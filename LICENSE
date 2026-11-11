@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 Hagai Akibayov
+Copyright (c) 2026 bayov
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +19,8 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+The fonts in Fonts/ and the libraries in Shared/Libs/ keep their own licences:
+TeX Gyre Adventor (GUST Font License), PT Sans Narrow (SIL Open Font License),
+LibStub (public domain), CallbackHandler-1.0, LibDataBroker-1.1 and
+LibDBIcon-1.0.

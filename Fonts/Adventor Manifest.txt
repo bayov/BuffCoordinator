@@ -1,0 +1,12 @@
+Adventor BC is TeX Gyre Adventor 2.501 (https://www.gust.org.pl/projects/e-foundry/tex-gyre/adventor),
+a free font in the style of ITC Avant Garde Gothic, by B. Jackowski, J.M. Nowacki and the
+GUST e-foundry. It's distributed under the GUST Font License ("Adventor License.txt").
+
+Buff Coordinator ships it converted from OpenType (CFF) to TrueType outlines, since the game
+loads TrueType files. As the license asks of derived works, the family is renamed from
+"TeX Gyre Adventor" to "Adventor BC" and the files are renamed:
+
+  texgyreadventor-regular.otf  ->  Adventor-Regular.ttf
+  texgyreadventor-bold.otf     ->  Adventor-Bold.ttf
+
+Nothing else about the glyphs or metrics changed.

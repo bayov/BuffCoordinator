@@ -1,0 +1,5 @@
+<!-- A key for the HUD's Next buff button: it buffs the next one, like a
+     click. HUD.lua names the binding and its heading. -->
+<Bindings>
+	<Binding name="CLICK BuffCoordinatorNext:LeftButton" header="BUFFCOORDINATOR" category="ADDONS"></Binding>
+</Bindings>
