@@ -490,6 +490,24 @@ function T.border(frame, color, alpha, layer)
     return e
 end
 
+-- Fits the edges of `frame` and of every frame inside it again, after its
+-- scale changed.
+--
+-- The edges are fitted when they're made and on each show. A frame whose
+-- scale changes while it's on show keeps edges fitted to the old scale. When
+-- the auction window shrinks Blizzard's to a scale of 0.001 to hide it, our
+-- buttons on it got edges 1000 times too thick, which showed as wide bands
+-- once Blizzard's window was back at its own scale.
+function T.refit(frame)
+    if not frame then return end
+    if frame.edges then fitEdges(frame) end
+    if not frame.GetChildren then return end
+    local n = frame.GetNumChildren and frame:GetNumChildren() or 0
+    if n == 0 then return end
+    local kids = { frame:GetChildren() }
+    for i = 1, #kids do T.refit(kids[i]) end
+end
+
 -- Makes the edges of T.border's `frame` `n` screen pixels wide. The width
 -- stays when the frame shows again, which fits the edges anew.
 function T.edgeWidth(frame, n)

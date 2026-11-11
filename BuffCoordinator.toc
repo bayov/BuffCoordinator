@@ -2,7 +2,7 @@
 ## Title: Buff|cff4db8ffCoordinator|r
 ## Notes: Raid buff and debuff assignments for every class, picked automatically or by the leader, with one-click buffing.
 ## Author: bayov
-## Version: 0.2.0
+## Version: 0.2.1
 ## X-Curse-Project-ID: 1793734
 ## SavedVariables: BuffCoordinatorDB
 ## IconTexture: Interface\AddOns\BuffCoordinator\Media\Logo
