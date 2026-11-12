@@ -25,6 +25,22 @@ function U.secret(v)
     return is ~= nil and is(v) == true
 end
 
+-- Whether the game hides the aura at `index` on `unit` from us right now.
+--
+-- We ask before each C_UnitAuras.GetAuraDataByIndex, because asking for a
+-- hidden aura isn't just an error we can catch. The game also logs a
+-- LUA_WARNING that blames BayovCore ("Auras cannot be accessed when secret"),
+-- and it shows up in BugSack under whatever Blizzard code was running, like
+-- Edit Mode's layout pass. Anniversary has no C_Secrets, so there it's never
+-- hidden.
+function U.auraHidden(unit, index, filter)
+    local sec = _G.C_Secrets
+    local ask = sec and sec.ShouldUnitAuraIndexBeSecret
+    if not ask then return false end
+    local ok, yes = pcall(ask, unit, index, filter)
+    return ok and not U.secret(yes) and yes == true
+end
+
 -- Whether `v` is there and we may read it.
 function U.readable(v)
     return v ~= nil and not U.secret(v)

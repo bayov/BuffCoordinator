@@ -17,7 +17,8 @@
 -- "!bc" for their assignments.
 --
 -- A giver also hears when their long buffs or blessings run out: once when
--- they run out soon, and again when they ran out or are missing (W.expiry).
+-- they run out soon, and again when they ran out or are missing (W.expiry),
+-- then every 5 minutes while they stay missing.
 -- Players with the addon see both on their HUD instead.
 --
 -- In a party (five or fewer, Tracking's Tr.party) we only whisper about buffs
@@ -467,7 +468,9 @@ end
 -- Fortitude ran out on: Grom, Thrall".
 --
 -- We go by each player's buff, so we tell the giver once for each cast. A
--- new cast lasts longer than the one before, and that starts it over.
+-- new cast lasts longer than the one before, and that starts it over. When
+-- the buff is still missing 5 minutes after we said so (REPEAT_EVERY), we
+-- say it's missing again, and so on every 5 minutes until it's back up.
 --
 -- "Soon" is the last twentieth of the cast (SOON_SHARE), so the warning
 -- fits how long the buff lasts. A 1-hour Prayer of Fortitude warns at 3
@@ -501,12 +504,14 @@ local EXPIRY_AHEAD = 60
 local PARTY_SOON = 120
 local MISSING_AFTER = 60
 local SOON_SHARE = 0.05
+local REPEAT_EVERY = 300
 -- What we know of each giver's buff on each player, by "giver\tbuff\tplayer":
 -- { g, m, b, ends, warn, soon, gone, missing, lacks }. `warn` is how many
 -- seconds before `ends` we say it runs out. `soon` and `gone` are "due"
 -- until we said them, then "told". `missing` is set when `gone` says the
 -- buff is missing rather than that it ran out. `lacks` is when we first saw
--- the buff missing. `ends` is 0 when we never saw it up.
+-- the buff missing. `ends` is 0 when we never saw it up. `toldAt` is when we
+-- last said it ran out or is missing.
 local watch = {}
 -- When we last told each giver their buffs run out.
 local expiryAt = {}
@@ -613,8 +618,10 @@ function W.expiry()
                     w.lacks = w.lacks or now
                     -- Ran out before we said it runs out: only that it did.
                     if w.soon == "due" then w.soon = "told" end
-                    if w.gone then
-                        -- Told already, or due to be.
+                    if w.gone == "told" then
+                        if now - w.toldAt >= REPEAT_EVERY then w.gone, w.missing = "due", true end
+                    elseif w.gone then
+                        -- Due to be told.
                     elseif w.ends > 0 and not party then
                         w.gone = "due"
                     elseif now - w.lacks >= MISSING_AFTER then
@@ -646,7 +653,11 @@ function W.expiry()
             end
             local text = giver and #list > 0 and expiryText(giver, list, now)
             for _, w in ipairs(list) do
-                if w.gone == "due" then w.gone = "told" else w.soon = "told" end
+                if w.gone == "due" then
+                    w.gone, w.toldAt = "told", now
+                else
+                    w.soon = "told"
+                end
             end
             if text and queue(name, text, true) then
                 expiryAt[name] = now

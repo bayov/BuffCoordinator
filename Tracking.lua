@@ -248,6 +248,7 @@ local function aurasOn(unit, filter)
     local ua = _G.C_UnitAuras
     if ua and ua.GetAuraDataByIndex then
         for i = 1, MAX_AURAS do
+            if NS.Util.auraHidden(unit, i, filter) then return list, true end
             local ok, a = pcall(ua.GetAuraDataByIndex, unit, i, filter)
             if not ok or secret(a) then return list, true end
             if not a then return list, unsure end
