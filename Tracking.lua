@@ -1204,9 +1204,15 @@ status = function(a)
                 st.unknown = st.unknown + 1
             elseif s.up then
                 local left = s.expires > 0 and s.expires - now or math.huge
-                local want = Tr.lowRank(a, up, m, s)
+                -- We only judge the rank of the plan's own buff. In a party
+                -- another blessing can stand in for Kings, and then a Might
+                -- of rank 6/7 said DOWNRANK under Kings, which has one rank.
+                -- That Might may also come from another paladin, whose
+                -- level we'd be judging by this giver's.
+                local own = up == b
+                local want = own and Tr.lowRank(a, up, m, s)
                 if want then st.low[#st.low + 1] = { m = m, b = b, rank = s.rank, want = want } end
-                local better = a.giver and a.giver.me and Tr.betterRank(up, m, s)
+                local better = own and a.giver and a.giver.me and Tr.betterRank(up, m, s)
                 if better and not wait then
                     -- They have it, and a cast of ours would make it better.
                     st.have, by.have = st.have + 1, by.have + 1

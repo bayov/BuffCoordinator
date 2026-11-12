@@ -994,6 +994,8 @@ end
 -- window is on screen.
 function mt:layout()
     self:wrapTabs()
+    -- The width we laid out at, so OnSizeChanged can tell a new one.
+    self.laidW = self.frame:GetWidth()
     local frameW = self.frame:GetWidth() or 0
     if frameW < 200 then frameW = Z.FALLBACK end
     local paneW = frameW - Z.SCROLL
@@ -1335,8 +1337,14 @@ function SP.new(parent, adapter, opts)
     self.scroll = scroll
     self.content = scroll.child
     -- The rows follow the window's width as it is resized.
+    --
+    -- Only a new width lays them out again. The height changes too, on every
+    -- change of tab whose preview is taller or shorter, and when the window is
+    -- made taller. Nothing in a layout reads the height, and the scroll frame
+    -- fits itself to it. On 2026-11-12 this fired 135 times in one session,
+    -- and each layout of Upgrades cost up to 6 ms and 160 KB.
     frame:SetScript("OnSizeChanged", function()
-        if frame:IsShown() then self:layout() end
+        if frame:IsShown() and frame:GetWidth() ~= self.laidW then self:layout() end
     end)
 
     -- ------------------------------------------------------------------

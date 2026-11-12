@@ -11,18 +11,18 @@
 -- after the last change, and out of combat. While a raid forms the board
 -- changes with every join, so a shorter wait would whisper a list that's
 -- already old. The Assignments page has a button for it. On a ready check a
--- giver only hears what's missing: "[BC] Fortitude missing on 4: Grom, Jaina
+-- giver only hears what's missing: "[BC] Fortitude missing on: Grom, Jaina
 -- (party 3), Thrall, Uther". A leader or an assistant can nudge a giver the
 -- same way from the coverage strip, once every 30 seconds each. Anyone may whisper us
 -- "!bc" for their assignments.
 --
 -- A giver also hears when their long buffs or blessings run out: once when
--- they're under the "Rebuff under" setting, and again when they ran out
--- (W.expiry). Players with the addon see both on their HUD instead.
+-- they run out soon, and again when they ran out or are missing (W.expiry).
+-- Players with the addon see both on their HUD instead.
 --
--- In a party (five or fewer, Tracking's Tr.party) we only whisper when a
--- buff has under 2 minutes left. Any blessing or totem will do there (Tracking.lua), so
--- a list of assignments or a ready check would only be noise. The button, a
+-- In a party (five or fewer, Tracking's Tr.party) we only whisper about buffs
+-- running out or missing. Any blessing or totem will do there (Tracking.lua),
+-- so a list of assignments or a ready check would only be noise. The button, a
 -- nudge and "!bc" still answer, since someone asked.
 --
 -- We never whisper a player the same text twice within a minute on our own,
@@ -98,13 +98,13 @@ local function blessingsText(a)
     local parts = {}
     for _, id in ipairs(order) do
         local who = #byBlessing[id] == nClasses and "everyone" or list(byBlessing[id])
-        parts[#parts + 1] = format("%s on %s", Tr.title(D.BY_ID[id]), who)
+        parts[#parts + 1] = format("%s on %s", NS.Buffer.short(Tr.title(D.BY_ID[id])), who)
     end
     local singles = {}
     for name, id in pairs(a.bless) do
         local m = R.byName(name)
         if m and a.byClass[m.class] ~= id then
-            singles[#singles + 1] = format("%s on %s", Tr.title(D.BY_ID[id]), name)
+            singles[#singles + 1] = format("%s on %s", NS.Buffer.short(Tr.title(D.BY_ID[id])), name)
         end
     end
     table.sort(singles)
@@ -115,7 +115,7 @@ end
 -- One assignment in words.
 local function assignmentText(a)
     if a.bless then return blessingsText(a) end
-    local name = a.buff.ask or Tr.title(a.buff)
+    local name = NS.Buffer.short(Tr.title(a.buff))
     if a.job.scope == "target" then return name .. " on the target" end
     if a.job.kind == "resist" then return format("%s for %s", name, Du.fight() or "this fight") end
     if a.party and R.raid() then return format("%s for group %d", name, a.party) end
@@ -156,7 +156,7 @@ local function namesText(ms, giver)
 end
 
 -- What assignment `a` is missing, in a whisper to its giver: "[BC]
--- Fortitude missing on 4: Grom, Jaina (party 3), Thrall, Uther". A player in
+-- Fortitude missing on: Grom, Jaina (party 3), Thrall, Uther". A player in
 -- another party of the raid has their party after the name. nil when
 -- nothing is missing. Shouts and totems go up in the fight, so only long
 -- buffs and blessings count.
@@ -178,7 +178,7 @@ function W.missingText(a)
     if #order == 0 then return nil end
     local parts = {}
     for _, list in ipairs(order) do
-        parts[#parts + 1] = format("%s missing on %d: %s", NS.Buffer.short(Tr.title(list.b)), #list,
+        parts[#parts + 1] = format("%s missing on: %s", NS.Buffer.short(Tr.title(list.b)),
                                    namesText(list, a.giver))
     end
     return "[BC] " .. table.concat(parts, ". ")
@@ -391,7 +391,8 @@ function W.request()
 end
 
 -- On a ready check: whispers each giver without the addon what their
--- assignments are missing. A giver with nothing missing hears nothing.
+-- assignments are missing. A giver with nothing missing hears nothing, and
+-- so does one who isn't next to us (R.close, Roster.lua).
 function W.ready()
     if NS.mock or not R.grouped() or not W.allowed("whisperReady") or InCombatLockdown() then return 0 end
     if Tr.party() then return 0 end
@@ -404,7 +405,7 @@ function W.ready()
         local plan = Du.plan(job.id)
         for _, a in ipairs(plan and plan.active and plan.list or {}) do
             local g = a.giver
-            if not g.me and g.online and not S.hasAddon(g.name) then
+            if not g.me and g.online and not S.hasAddon(g.name) and R.close(g) then
                 local text = W.missingText(a)
                 if text then
                     if not texts[g.name] then order[#order + 1] = g.name end
@@ -461,21 +462,35 @@ end
 -- Buffs running out
 -- =============================================================
 -- A giver without the addon hears when the long buffs and blessings they
--- put up run out soon, like "[BC] Fortitude runs out in 5 min on 4: Grom,
+-- put up run out soon, like "[BC] Fortitude runs out in 5 min on: Grom,
 -- Jaina (group 3), Thrall, Uther", and again when they ran out: "[BC]
--- Fortitude ran out on 2: Grom, Thrall".
+-- Fortitude ran out on: Grom, Thrall".
 --
 -- We go by each player's buff, so we tell the giver once for each cast. A
--- new cast lasts longer than the one before, and that starts it over. We
--- only say "ran out" about a buff we saw up, so a player who never had it
--- (they just joined, or the giver never buffed them) isn't in it. The list
--- of their assignments and the ready check tell them about those. A player
--- who died lost their buffs too, but that's not a buff running out, so they
--- aren't in it either.
+-- new cast lasts longer than the one before, and that starts it over.
+--
+-- "Soon" is the last twentieth of the cast (SOON_SHARE), so the warning
+-- fits how long the buff lasts. A 1-hour Prayer of Fortitude warns at 3
+-- minutes, and Thorns, which lasts 10 minutes, at 30 seconds. When we can't
+-- tell how long the cast lasts, we use the "Rebuff under" setting (2
+-- minutes at most in a party, PARTY_SOON).
+--
+-- A player who doesn't have the buff at all gets a minute (MISSING_AFTER)
+-- before we say "[BC] Fortitude missing on: Grom, Thrall". That's a
+-- player who just joined, who came back from the dead, or whom the giver
+-- never buffed. The minute lets the giver get to them on their own. In a
+-- party a buff that ran out also waits that minute and is told as missing,
+-- since a party rebuffs as it goes rather than all at once before a pull.
+--
+-- We only whisper a giver next to us, within buff range (R.close,
+-- Roster.lua), about the players next to us too. A giver across the zone
+-- can't cast on them anyway. When they come back we look at them afresh, so they hear what's
+-- missing after the same minute.
 --
 -- Buffs cast one by one run out one by one. So a giver hears from us at most
 -- once a minute (EXPIRY_GAP), and the "runs out" line also names whose buff
--- runs out within a minute after that (EXPIRY_AHEAD). A Prayer of Fortitude
+-- runs out within a minute after that (EXPIRY_AHEAD), or less for a short
+-- buff. A Prayer of Fortitude
 -- on each party then makes one whisper rather than eight.
 --
 -- Out of combat only, like the rest. What ran out in a fight is said once
@@ -484,9 +499,14 @@ local EXPIRY_EVERY = 5
 local EXPIRY_GAP = 60
 local EXPIRY_AHEAD = 60
 local PARTY_SOON = 120
+local MISSING_AFTER = 60
+local SOON_SHARE = 0.05
 -- What we know of each giver's buff on each player, by "giver\tbuff\tplayer":
--- { g, m, b, ends, soon, gone }. `soon` and `gone` are "due" until we said
--- them, then "told".
+-- { g, m, b, ends, warn, soon, gone, missing, lacks }. `warn` is how many
+-- seconds before `ends` we say it runs out. `soon` and `gone` are "due"
+-- until we said them, then "told". `missing` is set when `gone` says the
+-- buff is missing rather than that it ran out. `lacks` is when we first saw
+-- the buff missing. `ends` is 0 when we never saw it up.
 local watch = {}
 -- When we last told each giver their buffs run out.
 local expiryAt = {}
@@ -514,11 +534,18 @@ local function expiryGivers()
     return givers
 end
 
--- The "runs out" and "ran out" lines of the entries `list` of `giver`.
+-- `left` seconds as a whisper says them: "40 s" under a minute, else "3 min".
+local function leftText(left)
+    if left < 60 then return format("%d s", math.max(1, math.ceil(left))) end
+    return format("%d min", math.ceil(left / 60))
+end
+
+-- The "runs out", "ran out" and "missing" lines of the entries `list` of
+-- `giver`.
 local function expiryText(giver, list, now)
-    local soon, gone, order = {}, {}, {}
+    local soon, gone, missing, order = {}, {}, {}, {}
     for _, w in ipairs(list) do
-        local by = w.gone == "due" and gone or soon
+        local by = w.gone ~= "due" and soon or w.missing and missing or gone
         local e = by[w.b.id]
         if not e then
             e = { b = w.b, left = math.huge }
@@ -534,36 +561,35 @@ local function expiryText(giver, list, now)
         table.sort(e, function(x, y) return x.name < y.name end)
         local name = NS.Buffer.short(Tr.title(e.b))
         if o.by == soon then
-            parts[#parts + 1] = format("%s runs out in %d min on %d: %s", name, math.max(1, math.ceil(e.left / 60)),
-                                       #e, namesText(e, giver))
+            parts[#parts + 1] = format("%s runs out in %s on: %s", name, leftText(e.left), namesText(e, giver))
+        elseif o.by == missing then
+            parts[#parts + 1] = format("%s missing on: %s", name, namesText(e, giver))
         else
-            parts[#parts + 1] = format("%s ran out on %d: %s", name, #e, namesText(e, giver))
+            parts[#parts + 1] = format("%s ran out on: %s", name, namesText(e, giver))
         end
     end
     return TAG .. table.concat(parts, ". ")
 end
 
--- Looks at every giver's buffs, and whispers those who have one running out
--- or just ran out. Returns how many we whispered.
+-- Looks at every giver's buffs, and whispers those who have one running out,
+-- just ran out or missing. Returns how many we whispered.
 function W.expiry()
     if NS.mock or not R.grouped() or not W.allowed("whisperExpiry") or InCombatLockdown() then return 0 end
     if S.inGroupFor() < SETTLE then return 0 end
     local now = GetTime()
     local at = (O.get("rebuffMinutes") or 0) * 60
     local seen, due = {}, {}
-    -- In a party we don't say what ran out, only what runs out soon, and
-    -- "soon" is 2 minutes at most (PARTY_SOON), since a party rebuffs as it
-    -- goes rather than all at once before a pull.
     local party = Tr.party()
     if party then at = math.min(at, PARTY_SOON) end
     for name, list in pairs(expiryGivers()) do
         local g = list.giver
-        for _, a in ipairs(list) do
+        local near = R.close(g)
+        for _, a in ipairs(near and list or NONE) do
             for _, t in ipairs(Du.targets(a)) do
                 -- In a party what they have may be another blessing than
                 -- the plan's, and that's the one to warn about.
                 local m, s, b = t.m, nil, t.b
-                if not m.dead then s, b = Tr.standIn(a, m, t.b) end
+                if not m.dead and R.close(m) then s, b = Tr.standIn(a, m, t.b) end
                 local key = name .. "\t" .. b.id .. "\t" .. m.name
                 local w = watch[key]
                 if s and s.up and s.expires > 0 then
@@ -574,20 +600,34 @@ function W.expiry()
                         watch[key] = w
                     end
                     w.ends = s.expires
+                    local dur = tonumber(s.duration) or 0
+                    w.warn = dur > 0 and dur * SOON_SHARE or at
                     seen[key] = true
-                    if not w.soon and s.expires - now <= at then w.soon = "due" end
-                elseif s and not s.up and w then
+                    if not w.soon and s.expires - now <= w.warn then w.soon = "due" end
+                elseif s and not s.up then
+                    if not w then
+                        w = { g = g, m = m, b = b, ends = 0 }
+                        watch[key] = w
+                    end
                     seen[key] = true
-                    if not w.gone then w.gone = party and "told" or "due" end
+                    w.lacks = w.lacks or now
                     -- Ran out before we said it runs out: only that it did.
                     if w.soon == "due" then w.soon = "told" end
+                    if w.gone then
+                        -- Told already, or due to be.
+                    elseif w.ends > 0 and not party then
+                        w.gone = "due"
+                    elseif now - w.lacks >= MISSING_AFTER then
+                        w.gone, w.missing = "due", true
+                    end
                 end
                 if seen[key] and (w.soon == "due" or w.gone == "due") then due[name] = true end
             end
         end
     end
-    -- What we no longer look at: a player who left, died or got another
-    -- giver, or a giver who went offline or got the addon.
+    -- What we no longer look at: a player who left, died, went away from
+    -- us or got another giver, or a giver who went offline, away from us or
+    -- got the addon.
     for key in pairs(watch) do
         if not seen[key] then watch[key] = nil end
     end
@@ -598,7 +638,9 @@ function W.expiry()
             for key, w in pairs(watch) do
                 if w.g.name == name then
                     giver = w.g
-                    local ahead = not w.soon and not w.gone and w.ends - now <= at + EXPIRY_AHEAD
+                    local warn = w.warn or at
+                    local ahead = not w.soon and not w.gone and w.ends > now
+                                  and w.ends - now <= warn + math.min(EXPIRY_AHEAD, warn)
                     if w.gone == "due" or w.soon == "due" or ahead then list[#list + 1] = w end
                 end
             end

@@ -1,7 +1,8 @@
 -- The raid pane: our party or raid, on the left of the assignments window.
 --
 -- It's laid out like the game's raid window, two parties side by side, in
--- our own look. It shows the parties the raid uses and one empty one to move
+-- our own look. A party is a single box across the whole pane, with bigger
+-- rows, like the game's party frames. It shows the parties the raid uses and one empty one to move
 -- players into. Each player shows their spec's icon, their name and an icon
 -- for each of their assignments, with "+2" when more don't fit. A crown on
 -- top of the spec's icon marks the leader and a star an assistant, and a small
@@ -87,8 +88,20 @@ P.WIDTH = 2 * PAD + 2 * BOX_W + BOX_GAP + 8
 -- Where the parties start, under all the rows there can be, and the
 -- height that shows `boxes` parties without scrolling.
 local TOP = HEAD_H + 4 + 2 * (LINE + LINE_GAP) + STRIP + LINE_GAP + 4
+
+-- The size of the boxes and their rows. A raid has two small boxes side by
+-- side (SMALL). A party is a single box, so it takes the pane's whole width
+-- with bigger rows and icons (LARGE), like the game's party frames.
+local SMALL = { w = BOX_W, row = ROW_H, spec = ICON, icon = ICON, icons = ICONS, name = "body",
+                rank = 10, role = 12 }
+local LARGE = { w = 2 * BOX_W + BOX_GAP, row = 34, spec = 28, icon = 24, icons = 8, name = "tab",
+                rank = 13, role = 15 }
+
+local function lookFor(boxes) return boxes == 1 and LARGE or SMALL end
+local function boxHeight(look) return BOX_HEAD + 5 * (look.row + 1) + 4 end
+
 local function heightFor(boxes)
-    return TOP + math.ceil(boxes / 2) * (BOX_H + BOX_GAP) + PAD
+    return TOP + math.ceil(boxes / 2) * (boxHeight(lookFor(boxes)) + BOX_GAP) + PAD
 end
 -- The height that shows the parties the pane shows now (P.fit). The window
 -- opens this tall, until its grip sizes it.
@@ -1289,7 +1302,7 @@ local function makeRow(parent)
         return b
     end
     r.icons = {}
-    for i = 1, ICONS do
+    for i = 1, LARGE.icons do
         local b = slot(ICON)
         b.tex = T.icon(b, nil, ICON)
         b.tex:SetPoint("CENTER", b, "CENTER", 0, 0)
@@ -1316,9 +1329,26 @@ local function makeRow(parent)
     return r
 end
 
+-- Gives row `r` the sizes of `look` (SMALL or LARGE).
+local function sizeRow(r, look)
+    if r.look == look then return end
+    r.look = look
+    r:SetSize(look.w - 6, look.row)
+    r.spec:SetSize(look.spec, look.spec)
+    r.rank:SetSize(look.rank, look.rank)
+    r.role:SetSize(look.role, look.role)
+    for _, b in ipairs(r.icons) do
+        b:SetSize(look.icon, look.icon)
+        b.tex:SetSize(look.icon, look.icon)
+    end
+    r.more:SetSize(MORE, look.icon)
+    T.fitSize(r.name, math.huge, T.SIZE[look.name])
+end
+
 -- Paints row `r` for player `m`. `from` is the party a proposal moves them
 -- from.
 local function paintRow(r, m, from)
+    local look = r.look or SMALL
     r.m = m
     r.tint = from and T.ACCENT or nil
     rowColor(r, false)
@@ -1334,8 +1364,8 @@ local function paintRow(r, m, from)
     -- The assignments: the first sits leftmost, so the row reads in page
     -- order, and "+2" comes last.
     local list = shownAssignments(m)
-    local over = #list > ICONS
-    local shown = over and ICONS - 1 or #list
+    local over = #list > look.icons
+    local shown = over and look.icons - 1 or #list
     local right = 2
     if over then
         local rest = {}
@@ -1353,9 +1383,9 @@ local function paintRow(r, m, from)
         t.tex:SetTexture(x and Tr.icon(x.b) or nil)
         t:SetShown(x ~= nil)
         t:ClearAllPoints()
-        t:SetPoint("RIGHT", r, "RIGHT", -right - (i - 1) * (ICON + 1), 0)
+        t:SetPoint("RIGHT", r, "RIGHT", -right - (i - 1) * (look.icon + 1), 0)
     end
-    right = right + shown * (ICON + 1)
+    right = right + shown * (look.icon + 1)
 
     -- The marks after the name, and what they leave the name.
     local marks = {}
@@ -1383,7 +1413,7 @@ local function paintRow(r, m, from)
     for _, x in ipairs(marks) do tail = tail + x[2] + 3 end
 
     r.name:SetText(colored(m))
-    local room = max(20, r:GetWidth() - 26 - 4 - right - tail)
+    local room = max(20, r:GetWidth() - (3 + look.spec + 5) - 4 - right - tail)
     r.name:SetWidth(room)
     local at = min(r.name:GetStringWidth() or 0, room) + 3
     for _, x in ipairs(marks) do
@@ -1996,10 +2026,12 @@ local function drawPane()
     end
     local _, slots = P.proposalChanges()
     local boxes = P.boxes(members)
+    local look = lookFor(boxes)
+    local boxH = boxHeight(look)
     P.fit(members)
     for g = 1, boxes do
         local col, row = (g - 1) % 2, floor((g - 1) / 2)
-        local x, y = col * (BOX_W + BOX_GAP), row * (BOX_H + BOX_GAP)
+        local x, y = col * (BOX_W + BOX_GAP), row * (boxH + BOX_GAP)
         local list = byGroup[g] or {}
         table.sort(list, function(a, b)
             if (a.rank or 0) ~= (b.rank or 0) then return (a.rank or 0) > (b.rank or 0) end
@@ -2007,6 +2039,7 @@ local function drawPane()
         end)
         local b = C.pool(page, "paneBox", makeBox)
         b.g = g
+        b:SetSize(look.w, boxH)
         T.paint(b, { 1, 1, 1 }, 0.08)
         b.title:SetText((R.raid() or g > 1) and format("Group %d", g) or "Party")
         local addable = NS.mock and #list < 5 and not proposal
@@ -2031,7 +2064,7 @@ local function drawPane()
             for _, gap in ipairs(P.partyGaps(list, buffs, members)) do all[#all + 1] = { gap = gap } end
         end
         local titleW = (b.title:GetStringWidth() or 0) + 4 + (b.count:GetStringWidth() or 0)
-        local right = BOX_W - (addable and 25 or 5)
+        local right = look.w - (addable and 25 or 5)
         local room = right - (6 + titleW) - 6
         local fit = min(#all, BUFFS, max(0, floor((room + 1) / (BUFF + 1))))
         -- Where the first buff starts, from the title's right edge, so the
@@ -2069,11 +2102,12 @@ local function drawPane()
             r.ax, r.ay = x + 3, y + ry
             r:ClearAllPoints()
             r:SetPoint("TOPLEFT", page.body, "TOPLEFT", r.ax, -r.ay)
+            sizeRow(r, look)
             paintRow(r, m, proposal and proposal.moved[m.name])
-            ry = ry + ROW_H + 1
+            ry = ry + look.row + 1
         end
     end
-    page.body:SetHeight(floor((boxes - 1) / 2 + 1) * (BOX_H + BOX_GAP))
+    page.body:SetHeight(floor((boxes - 1) / 2 + 1) * (boxH + BOX_GAP))
     page.scroll:update()
     P.slideRows()
 end

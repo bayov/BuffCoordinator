@@ -71,6 +71,15 @@ function Wd.new(spec)
     local screen = { icons = icons, live = true }
     local holder
     local function opt(k) return O.get(key .. k) end
+    -- The space between icons. Another addon can set it (O.lookGap), like
+    -- BayovCore's Flush look with -1, so neighbours share one border line.
+    -- HUD.lua's gaps() tells the story. Without the black border there's
+    -- nothing to share, so we stop at touching.
+    local function gap()
+        local g = O.lookGap() or opt("Gap")
+        if g < 0 and not O.get("border") then g = 0 end
+        return g
+    end
     -- Goes up with every settings change, so each icon fits itself again
     -- to a new font or border.
     local fitGen = 0
@@ -269,7 +278,7 @@ function Wd.new(spec)
     -- has.
     local function arrange(view, list)
         local icons = view.icons
-        local w, h, gap = opt("Width"), opt("Height"), opt("Gap")
+        local w, h, gap = opt("Width"), opt("Height"), gap()
         local perRow, align, grow = opt("PerRow"), opt("Align"), opt("Grow")
         local p = T.pixel(view.holder)
         local cols = max(1, min(#list, perRow))
@@ -394,7 +403,7 @@ function Wd.new(spec)
             local p = T.pixel(view.holder)
             -- Rows that grow up go above the first row, so the first row
             -- moves down to make room in the pane.
-            st.lift = opt("Grow") == "up" and (rows - 1) * (opt("Height") + opt("Gap")) * p or 0
+            st.lift = opt("Grow") == "up" and (rows - 1) * (opt("Height") + gap()) * p or 0
             view.holder:SetAlpha(opt("Alpha"))
             return w * p, h * p
         end

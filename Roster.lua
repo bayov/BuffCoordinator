@@ -453,6 +453,66 @@ end
 
 function R.canEdit() return NS.mock ~= nil or R.real.canEdit() end
 
+-- How far apart two players may be and still count as near each other.
+R.NEAR = 300
+
+-- Where the game says `unit` is: x, y and the instance, or nil when it
+-- won't say. In a dungeon or raid it doesn't say for other players.
+local function position(unit)
+    if not _G.UnitPosition then return nil end
+    local y, x, _, inst = UnitPosition(unit)
+    if not readable(x) or not readable(y) or not readable(inst) or not x or not y then return nil end
+    return x, y, inst
+end
+
+-- The map `unit` is on, or nil when the game won't say.
+local function mapOf(unit)
+    local M = _G.C_Map
+    local map = M and M.GetBestMapForUnit and M.GetBestMapForUnit(unit)
+    return readable(map) and map or nil
+end
+
+-- Whether players `a` and `b` are within NEAR yards of each other.
+--
+-- In a dungeon or raid the game hides where the others stand, so there the
+-- same map is near enough. When the game says nothing at all we count them
+-- as near, so a whisper isn't held back for good on a client that hides it.
+function R.near(a, b)
+    if a == b or a.name == b.name then return true end
+    if type(a.unit) ~= "string" or type(b.unit) ~= "string" then return true end
+    local ax, ay, ai = position(a.unit)
+    local bx, by, bi = position(b.unit)
+    if ax and bx then
+        return ai == bi and (ax - bx) ^ 2 + (ay - by) ^ 2 <= R.NEAR ^ 2
+    end
+    local am, bm = mapOf(a.unit), mapOf(b.unit)
+    if am and bm then return am == bm end
+    return true
+end
+
+-- Whether player `m` is next to us: within buff range, about 40 yards.
+--
+-- R.near isn't enough for this. When the game hides where other players
+-- stand, R.near falls back to "on the same map", and then a whisper went to
+-- a giver across the zone. The game still
+-- says whether a group member is in range. When it won't, we ask whether they
+-- are in sight (about 100 yards), and only then fall back to R.near.
+function R.close(m)
+    if m.me then return true end
+    local unit = m.unit
+    if type(unit) ~= "string" then return true end
+    if _G.UnitInRange then
+        local ok, yes, checked = pcall(UnitInRange, unit)
+        if ok and readable(yes) and readable(checked) and checked then return yes == true end
+    end
+    if _G.UnitIsVisible then
+        local vis = UnitIsVisible(unit)
+        if readable(vis) and vis ~= nil then return vis == true end
+    end
+    local me = R.me()
+    return not me or R.near(me, m)
+end
+
 -- What we know of player `name`, here or not: { name, class, spec }. One
 -- who isn't here is someone we grouped with before, or a player of the
 -- plan in use, made up or real.

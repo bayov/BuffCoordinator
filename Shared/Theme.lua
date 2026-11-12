@@ -76,6 +76,9 @@ T.ORANGE = { 1.00, 0.58, 0.15 }
 -- Text alphas, from EUI: a label is full white, a description about half, a
 -- section heading less, and anything disabled barely there.
 T.A_TEXT  = 0.92
+-- The line under a row or a number on a Ledger page (T.SIZE.sub). Dimmer
+-- than the row, but still easy to read at 12 pt.
+T.A_SUB   = 0.70
 T.A_DIM   = 0.55
 T.A_FAINT = 0.38
 T.A_OFF   = 0.22
@@ -173,6 +176,24 @@ end
 -- status, and `caption` the small print, like the version line.
 T.SIZE = { title = 22, tab = 14, label = 14, body = 13, caption = 11 }
 
+-- A Ledger page's own steps, the Session page and the Sessions window's list
+-- first. A page has more small print than a settings page, so it needs more
+-- steps between the title and the axis times:
+--
+--   page      the page's own title (the Session page's title block)
+--   value     a tile's number, the biggest thing after the title
+--   section   a section or card heading, in capitals at T.A_DIM
+--   row       a row's words, a line of facts, a list entry's name
+--   sub       the line under a row or a number, at T.A_SUB
+--   tiny      axis times, a lane's name, a hint, the dim words beside a
+--             heading, at T.A_DIM
+--   bar       words drawn inside a 10 to 12 px bar or lane
+--
+-- Text under 12 pt is only for labels a player glances at, never for what
+-- they read: at the Sessions window's 0.8 scale, 11 pt is under 9 px.
+T.SIZE.page, T.SIZE.value, T.SIZE.section = 18, 20, 12
+T.SIZE.row, T.SIZE.sub, T.SIZE.tiny, T.SIZE.bar = 12, 12, 11, 10
+
 -- The sizes of the controls, in the same spirit. `w` and `h` are what a
 -- control is made at when its caller gives no size, and `size` its text.
 T.CONTROL = {
@@ -242,6 +263,26 @@ function T.text(parent, size, bold, alpha, layer)
     fs:SetJustifyH("LEFT")
     texts[fs] = { bold = bold and true or false, size = size or 14 }
     return fs
+end
+
+-- Puts a one-line text at `size`, or one step smaller (`small`) when its
+-- words don't fit `room` at `size`, so a long name loses a point before it
+-- loses its end. Answers whether the words fit now. A text made by T.text
+-- keeps the size through T.restyle.
+function T.fitSize(fs, room, size, small)
+    local path, _, flags = fs:GetFont()
+    if not path then return true end
+    local function set(s)
+        fs:SetFont(path, s, flags or "")
+        if texts[fs] then texts[fs].size = s end
+    end
+    set(size)
+    local function width()
+        return fs.GetUnboundedStringWidth and fs:GetUnboundedStringWidth() or fs:GetStringWidth() or 0
+    end
+    if width() <= room or not small or small >= size then return width() <= room end
+    set(small)
+    return width() <= room
 end
 
 -- Gives a tooltip's lines the font of its own body lines. We call it after

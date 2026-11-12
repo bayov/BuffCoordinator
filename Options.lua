@@ -119,6 +119,12 @@ local function iconFont()
     return NS.loaded("EllesmereUI") and "Avant Garde" or "Adventor Bold"
 end
 
+-- A Gap row is greyed while another addon sets the gap for us (O.lookGap).
+local function gapFree()
+    if O.lookGap() then return false, "Set by another addon." end
+    return true
+end
+
 O.DECLS = {
     -- When we run the board: what reaches the rest of the group
     whisper = { default = true, kind = "bool", section = "Board", order = 1,
@@ -126,10 +132,10 @@ O.DECLS = {
         desc = "Whisper players without the addon when their assignments change." },
     whisperReady = { default = true, kind = "bool", section = "Board", order = 2,
         name = "Whisper on ready checks",
-        desc = "Players without the addon hear who's missing their long buffs or blessings." },
+        desc = "Nearby players without the addon hear who's missing their long buffs or blessings." },
     whisperExpiry = { default = true, kind = "bool", section = "Board", order = 3,
-        name = "Whisper when buffs run out",
-        desc = "Players without the addon hear when their long buffs or blessings run out soon, and when they ran out." },
+        name = "Whisper missing buffs",
+        desc = "Nearby players without the addon hear when their long buffs or blessings are missing or run out soon." },
     suggest = { default = true, kind = "bool", section = "Board", order = 4,
         name = "Let players suggest changes",
         desc = "Players without rank can send you changes to apply or turn down. When off, they can only look." },
@@ -182,12 +188,7 @@ O.DECLS = {
         desc = "The height of each icon, in screen pixels." },
     gap = { inherit = "allGap", kind = "number", min = 0, max = 40, step = 1,
         section = "HUDIcons", order = 3, name = "Gap",
-        desc = "The space between icons, in screen pixels.",
-        -- Greyed while another addon sets the gap for us (O.lookGap).
-        needs = function()
-            if O.lookGap() then return false, "Set by another addon." end
-            return true
-        end },
+        desc = "The space between icons, in screen pixels.", needs = gapFree },
     perRow = { default = 6, kind = "number", min = 1, max = 20, step = 1,
         section = "HUD", order = 7, name = "Icons per row",
         desc = "How many icons go in a row before a new row starts." },
@@ -311,7 +312,7 @@ O.DECLS = {
         desc = "The height of each icon, in screen pixels." },
     allGap = { default = 4, kind = "number", min = 0, max = 40, step = 1,
         section = "Icons", order = 3, name = "Gap",
-        desc = "The space between icons, in screen pixels." },
+        desc = "The space between icons, in screen pixels.", needs = gapFree },
     allCountSize = { default = 12, kind = "number", min = 6, max = 30, step = 1,
         section = "Icons", order = 4, name = "Count size",
         desc = "The size of the count on an icon." },
@@ -356,7 +357,7 @@ local function widget(key, show, section, label, d)
         Height = { default = 48, kind = "number", min = 16, max = 160, step = 1,
             name = "Icon height", desc = "The height of each icon, in screen pixels." },
         Gap = { default = 4, kind = "number", min = 0, max = 40, step = 1,
-            name = "Gap", desc = "The space between icons, in screen pixels." },
+            name = "Gap", desc = "The space between icons, in screen pixels.", needs = gapFree },
         PerRow = { default = d.perRow, kind = "number", min = 1, max = 20, step = 1,
             name = "Icons per row", desc = "How many icons go in a row before a new row starts." },
         Align = { default = d.align, kind = "enum", values = { "left", "center", "right" },
