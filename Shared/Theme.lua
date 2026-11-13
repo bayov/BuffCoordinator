@@ -168,6 +168,64 @@ function T.chevron(parent, size, alpha)
     return t
 end
 
+-- Makes edit box `e` read as plain text until the mouse is on it or it has
+-- focus, for numbers that are mostly read and only sometimes changed. Call
+-- it after the box's own OnEnter and OnLeave are set, since SetScript drops
+-- hooks.
+function T.quietEdit(e)
+    local function look()
+        local focus = e:HasFocus()
+        local on = focus or e.hover
+        e.bg:SetShown(on and true or false)
+        if not focus then T.paint(e, { 1, 1, 1 }, on and 0.12 or 0) end
+    end
+    e.quietLook = look
+    e:HookScript("OnEnter", function()
+        e.hover = true
+        look()
+    end)
+    e:HookScript("OnLeave", function()
+        e.hover = nil
+        look()
+    end)
+    e:HookScript("OnEditFocusGained", look)
+    e:HookScript("OnEditFocusLost", look)
+    look()
+end
+
+-- A dim up and down arrow inside an edit box's left end, on a box the mouse
+-- wheel changes, like a count. The text keeps clear of them.
+function T.wheelHint(edit)
+    local up = T.chevron(edit, 8, 0.35)
+    up:SetTexCoord(0, 1, 1, 0)
+    up:SetPoint("BOTTOM", edit, "LEFT", 9, -1)
+    local down = T.chevron(edit, 8, 0.35)
+    down:SetPoint("TOP", edit, "LEFT", 9, 1)
+    if edit.SetTextInsets then edit:SetTextInsets(16, 6, 0, 0) end
+    edit.wheelUp, edit.wheelDown = up, down
+    return up, down
+end
+
+-- Shows that a wheel turn on `edit` hit its limit, like a count under 1 or
+-- over what there is. The border and the arrow that way (T.wheelHint) flash
+-- red for a moment.
+T.LIMIT_FLASH = 0.35
+function T.wheelLimit(edit, up)
+    local arrow = up and edit.wheelUp or edit.wheelDown
+    local c = T.WARN
+    if arrow then arrow:SetVertexColor(c[1], c[2], c[3], 1) end
+    edit.bg:Show()
+    T.paint(edit, c, 0.9)
+    edit.limitN = (edit.limitN or 0) + 1
+    local n = edit.limitN
+    C_Timer.After(T.LIMIT_FLASH, function()
+        if edit.limitN ~= n then return end
+        if arrow then arrow:SetVertexColor(1, 1, 1, 0.35) end
+        if edit:HasFocus() then T.paint(edit, T.ACCENT, 0.9) else T.paint(edit, { 1, 1, 1 }, 0.12) end
+        if edit.quietLook then edit.quietLook() end
+    end)
+end
+
 -- The type scale. Every text in a window is one of these sizes, so a page
 -- can't pick a size of its own and the window reads as one thing.
 --
@@ -383,6 +441,12 @@ end
 -- restyles every window drawn with T.panel at once, open or not. Without
 -- NS.PanelLook a panel has PANEL_LOOK, the Look tab's defaults.
 --
+-- NS.PanelLook gets the panel's frame, so an addon can give some windows a
+-- look of their own. BayovCore tints its windows by category that way
+-- (T.windowLook in its Theme.lua). A look's `tint` is the name of one of
+-- T.PANEL_TINTS or a colour of its own, and `flip` (when set) overrides
+-- T.PANEL_FLIP.
+--
 -- It takes two sublevels of BACKGROUND, from `sub` (0 when not given). The
 -- caller draws its own border, like T.windowEdge.
 T.PANEL_TEX = MEDIA .. "Panel.png"
@@ -400,16 +464,19 @@ local PANEL_LOOK = { texture = "Panel", tint = "Blue", dark = 0.25, grain = 0.06
 local panels = setmetatable({}, { __mode = "k" })
 
 local function restyle(f)
-    local look = (NS.PanelLook and NS.PanelLook()) or PANEL_LOOK
+    local look = (NS.PanelLook and NS.PanelLook(f)) or PANEL_LOOK
     local o = look.opacity
     if look.texture == "Plain" then
         f.bg:SetDesaturated(false)
         f.bg:SetVertexColor(1, 1, 1, 1)
         f.bg:SetColorTexture(T.BG[1], T.BG[2], T.BG[3], o)
     else
-        local tint = T.PANEL_TINTS[look.tint]
+        local tint = look.tint
+        if type(tint) ~= "table" then tint = T.PANEL_TINTS[tint] end
+        local flip = look.flip
+        if flip == nil then flip = T.PANEL_FLIP end
         f.bg:SetTexture(T.PANEL_TEX)
-        if T.PANEL_FLIP then f.bg:SetTexCoord(1, 0, 1, 0) else f.bg:SetTexCoord(0, 1, 0, 1) end
+        if flip then f.bg:SetTexCoord(1, 0, 1, 0) else f.bg:SetTexCoord(0, 1, 0, 1) end
         f.bg:SetDesaturated(tint and true or false)
         if tint then
             f.bg:SetVertexColor(tint[1], tint[2], tint[3], o)
@@ -1408,7 +1475,8 @@ end
 -- in sight. The text goes through the button's own SetText and GetText, so a
 -- caller treats it like any other button. `b:SetText` sizes it to its words
 -- unless it was given a width. `b:setAccent(on)` makes it the main action or
--- a plain one.
+-- a plain one, and `b:setTint(color)` paints the main action in another
+-- colour than the accent (nil for the accent again).
 function T.button(parent, label, w, h, accent)
     local size = T.CONTROL.button
     local b = CreateFrame("Button", nil, parent)
@@ -1426,12 +1494,13 @@ function T.button(parent, label, w, h, accent)
     local function look(self, hover)
         local on = self:IsEnabled()
         local accent = self.accent
+        local c = self.tint or T.ACCENT
         if accent then
-            self.bg:SetColorTexture(T.ACCENT[1], T.ACCENT[2], T.ACCENT[3], 0.22)
+            self.bg:SetColorTexture(c[1], c[2], c[3], 0.22)
         else
             self.bg:SetColorTexture(0.10, 0.11, 0.13, 0.85)
         end
-        T.paint(self, accent and T.ACCENT or { 1, 1, 1 }, not on and 0.06
+        T.paint(self, accent and c or { 1, 1, 1 }, not on and 0.06
                                                           or hover and (accent and 0.9 or 0.32)
                                                           or (accent and 0.55 or 0.16))
         self.label:SetTextColor(1, 1, 1, not on and T.A_OFF or hover and 1 or 0.78)
@@ -1445,6 +1514,11 @@ function T.button(parent, label, w, h, accent)
     function b:GetText() return self.label:GetText() end
     function b:setAccent(on)
         self.accent = on and true or false
+        look(self, false)
+    end
+    function b:setTint(color)
+        if self.tint == color then return end
+        self.tint = color
         look(self, false)
     end
 
@@ -1825,6 +1899,18 @@ local closeMenus
 local openDrop            -- the dropdown list on show, or nil
 local closed = {}         -- the button whose mouse down just closed a pop-up
 
+-- Whether the mouse is over `f`, false when the game won't say.
+--
+-- The game refuses to measure a frame anchored to a nameplate ("Can't measure
+-- restricted regions") and IsMouseOver() then throws. That happened with a
+-- menu opened from an Object Highlight icon, which sits on a nameplate.
+local function mouseOver(f)
+    if not (f and f.IsMouseOver) then return false end
+    if f.IsAnchoringRestricted and f:IsAnchoringRestricted() then return false end
+    local ok, over = pcall(f.IsMouseOver, f)
+    return ok and over and true or false
+end
+
 local catcher = CreateFrame("Frame")
 catcher:SetScript("OnEvent", function()
     for _, x in pairs(menus) do
@@ -1832,7 +1918,7 @@ catcher:SetScript("OnEvent", function()
     end
     if openDrop and openDrop:IsShown() and openDrop:IsMouseOver() then return end
     local owner = (menus[1] and menus[1]:IsShown() and menus[1].owner) or (openDrop and openDrop.owner)
-    if owner and owner.IsMouseOver and owner:IsMouseOver() then
+    if mouseOver(owner) then
         closed.owner, closed.t = owner, GetTime and GetTime() or 0
     end
     closeMenus()
@@ -2478,10 +2564,9 @@ function T.grip(f, done, reset)
         if not gt then return end
         gt:SetOwner(self, "ANCHOR_RIGHT")
         gt:AddLine("Size", 1, 1, 1)
-        local a = T.ACCENT
-        gt:AddDoubleLine("Drag", "resize", a[1], a[2], a[3], 1, 1, 1)
-        if reset then gt:AddDoubleLine("Right-click", "reset the size", a[1], a[2], a[3], 1, 1, 1) end
-        T.tipSmall(gt, reset and 2 or 1)
+        local hints = { { "Drag", "resize" } }
+        if reset then hints[2] = { "Right-click", "reset the size" } end
+        T.tipHints(gt, hints)
         gt:Show()
     end
     grip:SetScript("OnEnter", function(self)
@@ -2606,6 +2691,9 @@ function T.scroll(parent)
     end
 
     function sf:update()
+        -- A list that paints only its rows in view (AuctionWindow's) hears
+        -- each scroll here.
+        if self.onScroll then self:onScroll() end
         local r = range()
         local h = self:GetHeight() or 0
         if r <= 0.5 or h <= 0 then
@@ -2624,16 +2712,32 @@ function T.scroll(parent)
     -- A scroll inside another (a table on a scrolling page) passes the wheel
     -- on when it has nowhere to go that way, so the page still scrolls under
     -- the mouse.
+    --
+    -- It passes it on too while the page cuts it off on the side the wheel
+    -- goes to. A table whose bottom is below the page's edge first comes up
+    -- into view on a scroll down, and only then scrolls its own rows. That
+    -- shows more of its rows either way, and the player sees the whole table
+    -- before it moves on its own.
+    local function outer(self)
+        local p = self.GetParent and self:GetParent()
+        while p do
+            if p.setScroll and p.GetScript and p:GetScript("OnMouseWheel") then return p end
+            p = p.GetParent and p:GetParent()
+        end
+    end
     sf:SetScript("OnMouseWheel", function(self, delta)
         local cur = self.GetVerticalScroll and self:GetVerticalScroll() or 0
         local r = range()
-        if r <= 0.5 or (delta > 0 and cur <= 0.5) or (delta < 0 and cur >= r - 0.5) then
-            local p = self.GetParent and self:GetParent()
-            while p do
-                local wheel = p.setScroll and p.GetScript and p:GetScript("OnMouseWheel")
-                if wheel then return wheel(p, delta) end
-                p = p.GetParent and p:GetParent()
+        local o = outer(self)
+        local pass = r <= 0.5 or (delta > 0 and cur <= 0.5) or (delta < 0 and cur >= r - 0.5)
+        if o and not pass and self.GetTop and o.GetTop then
+            local t, b, ot, ob = self:GetTop(), self:GetBottom(), o:GetTop(), o:GetBottom()
+            if t and b and ot and ob then
+                pass = (delta < 0 and b < ob - 0.5) or (delta > 0 and t > ot + 0.5)
             end
+        end
+        if pass then
+            if o then return o:GetScript("OnMouseWheel")(o, delta) end
             if r <= 0.5 then return end
         end
         self:setScroll(cur - delta * STEP)
@@ -2721,10 +2825,13 @@ local SHADOW_A = 0.55
 local SHADOW_END = 16
 local SHADOW_TEX = MEDIA .. "Shadow"
 local BLACK = { 0, 0, 0 }
-function T.shadow(host)
+-- `up` turns it over, dark at the bottom, for a shadow cast up from a bar
+-- under a list.
+function T.shadow(host, up)
     local function piece()
         local t = host:CreateTexture(nil, "OVERLAY")
         t:SetTexture(SHADOW_TEX)
+        if up then t:SetTexCoord(0, 1, 1, 0) end
         if t.SetSnapToPixelGrid then
             t:SetSnapToPixelGrid(false)
             t:SetTexelSnappingBias(0)
@@ -2757,19 +2864,28 @@ end
 --
 -- It fades in over SHADOW_FADE_S as the list leaves the top, and out the
 -- same way when it gets back.
+--
+-- T.scrollShadow(sf, "BOTTOM") is the same along the bottom, for a list with
+-- a fixed bar under it. It shows while there's more of the list below.
 local SHADOW_H = 12
 local SHADOW_FADE_S = 0.2
-function T.scrollShadow(sf)
-    -- It starts a pixel above the list. The game rounds where a texture
+function T.scrollShadow(sf, edge)
+    local bottom = edge == "BOTTOM"
+    -- It starts a pixel past the list. The game rounds where a texture
     -- lands to the screen's pixels but not where the list cuts off its rows,
-    -- so starting level with the list could leave a pixel of a row above it.
+    -- so starting level with the list could leave a pixel of a row past it.
     local host = CreateFrame("Frame", nil, sf)
     local up = T.pixel(sf)
-    host:SetPoint("TOPLEFT", sf, "TOPLEFT", 0, up)
-    host:SetPoint("TOPRIGHT", sf, "TOPRIGHT", 0, up)
+    if bottom then
+        host:SetPoint("BOTTOMLEFT", sf, "BOTTOMLEFT", 0, -up)
+        host:SetPoint("BOTTOMRIGHT", sf, "BOTTOMRIGHT", 0, -up)
+    else
+        host:SetPoint("TOPLEFT", sf, "TOPLEFT", 0, up)
+        host:SetPoint("TOPRIGHT", sf, "TOPRIGHT", 0, up)
+    end
     host:SetHeight(SHADOW_H + up)
     host:SetFrameLevel((sf:GetFrameLevel() or 0) + 20)
-    T.shadow(host)
+    T.shadow(host, bottom)
     -- We lift it over the rows again each time it shows. Raising the window
     -- re-levels everything in it, which can leave the rows above the shadow.
     local want, alpha = 0, 0
@@ -2785,6 +2901,10 @@ function T.scrollShadow(sf)
     local function refresh(_, _, first)
         local s = sf.GetVerticalScroll and sf:GetVerticalScroll() or 0
         local on = s > 0.5
+        if bottom then
+            local range = sf.GetVerticalScrollRange and sf:GetVerticalScrollRange() or 0
+            on = range - s > 0.5
+        end
         if on and not host:IsShown() then
             host:SetFrameLevel((sf:GetFrameLevel() or 0) + 20)
             host:Show()
@@ -2799,8 +2919,13 @@ function T.scrollShadow(sf)
         end
     end
     sf:HookScript("OnVerticalScroll", refresh)
+    -- The rows below come and go as the list grows, shrinks or is sized.
+    if bottom then
+        sf:HookScript("OnScrollRangeChanged", function() refresh() end)
+        sf:HookScript("OnSizeChanged", function() refresh() end)
+    end
     refresh(nil, nil, true)
-    sf.shadow = host
+    if bottom then sf.shadowBottom = host else sf.shadow = host end
     return host
 end
 
@@ -2925,7 +3050,12 @@ local function unshrink(fs)
     end
 end
 
+-- The left texts of each tooltip's key hints (T.tipHints), so code that
+-- moves lines can tell a hint by its text wherever it went.
+local hintTexts = setmetatable({}, { __mode = "k" })
+
 local function onCleared(tip)
+    hintTexts[tip] = nil
     for fs, o in pairs(shrunk) do
         if o.tip == tip then unshrink(fs) end
     end
@@ -3041,14 +3171,48 @@ function T.tipSmall(tip, n)
     for i = last - (n or 1) + 1, last do T.tipLineSmall(tip, i) end
 end
 
--- Key hints at the bottom of a tooltip: the key in the accent on the left,
--- what it does on the right, both small. `hints` is
--- { { "Click", "change who's on it" }, ... }.
+-- Key hints at the bottom of a tooltip, under a blank line. Every BayovCore
+-- tooltip says its clicks and drags this one way: small and dim, the key on
+-- the left a little brighter than what it does on the right. `hints` is
+-- { { "Click", "change who's on it" }, { "Shift-click", "..." } }.
+--
+-- Keys are "Click", "Right-click", "Shift-click", "Alt-click", "Ctrl-click",
+-- "Shift-right-click", "Double-click", "Drag" and "Scroll". What it does is
+-- a short phrase in lower case with no full stop.
+T.TIP_HINT_KEY, T.TIP_HINT_TEXT = T.A_SUB, T.A_DIM
 function T.tipHints(tip, hints)
     if not hints or #hints == 0 then return end
-    local a = T.ACCENT
-    for _, h in ipairs(hints) do tip:AddDoubleLine(h[1], h[2], a[1], a[2], a[3], 1, 1, 1) end
+    -- One blank line above the hints. None when the tooltip already ends in
+    -- a blank line ("" or " "), or in hints from an earlier call, so a
+    -- helper's hints and a caller's extra one stay together.
+    local n = tip.NumLines and tip:NumLines()
+    if type(n) == "number" and n >= 1 then
+        local last = lineStrings(tip, n)
+        local text = last and last:GetText()
+        -- A spell's own lines can be secret in combat, and a secret line
+        -- isn't blank as far as we can tell.
+        local hidden = _G.issecretvalue and _G.issecretvalue(text)
+        local blank = last and not hidden and (text == nil or (type(text) == "string" and not text:find("%S")))
+        if not (blank or T.tipLineIsHint(tip, n)) then tip:AddLine(" ") end
+    end
+    local k, v = T.TIP_HINT_KEY, T.TIP_HINT_TEXT
+    local texts = hintTexts[tip] or {}
+    hintTexts[tip] = texts
+    for _, h in ipairs(hints) do
+        tip:AddDoubleLine(h[1], h[2], k, k, k, v, v, v)
+        texts[h[1]] = true
+    end
     T.tipSmall(tip, #hints)
+end
+
+-- Whether line `i` is one of the key hints, or the blank line above them.
+function T.tipLineIsHint(tip, i)
+    local texts = hintTexts[tip]
+    local l = texts and lineStrings(tip, i)
+    if not l then return false end
+    local text = l:GetText()
+    if _G.issecretvalue and _G.issecretvalue(text) then return false end
+    return text ~= nil and texts[text] == true
 end
 
 -- Shows tooltip `tip` with every line under the title in one size.
@@ -3105,13 +3269,7 @@ function T.tip(owner, title, lines, hints)
             tip:AddLine(l, 0.8, 0.8, 0.8, true)
         end
     end
-    if hints and #hints > 0 then
-        local n = tip.NumLines and tip:NumLines()
-        local lastText = n and n > 1 and lineStrings(tip, n)
-        lastText = lastText and lastText:GetText()
-        if lastText ~= " " then tip:AddLine(" ") end
-        T.tipHints(tip, hints)
-    end
+    T.tipHints(tip, hints)
     T.tipDone(tip)
 end
 

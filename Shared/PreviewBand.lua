@@ -74,7 +74,7 @@
 --                  { file, aspect, coords } and a number, or nil for none
 --   hitTip(b, region, key, decl, label, text)
 --                  draws the tooltip of a part, in place of the setting's
---                  name and "Click to edit it below."
+--                  name and its "Click  edit it below" hint
 --   hitLeave(b, region)
 --                  hears when the mouse leaves a part
 --   report(err)    hears an error, the game's error handler when not given
@@ -116,11 +116,12 @@ local GREY = { 0.5, 0.5, 0.5 }
 -- The band's own colour, under the picture.
 local BG = { 0.04, 0.045, 0.055 }
 
-local function simpleTip(owner, title, text)
+local function simpleTip(owner, title, text, hints)
     if not GameTooltip then return end
     GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
     GameTooltip:AddLine(title, 1, 1, 1)
     if text then GameTooltip:AddLine(text, GREY[1], GREY[2], GREY[3], true) end
+    T.tipHints(GameTooltip, hints)
     GameTooltip:Show()
 end
 
@@ -194,8 +195,7 @@ function PB.new(parent, build, opts)
             if opts.hitTip then
                 opts.hitTip(self, region, k, d, ask(label), body)
             else
-                simpleTip(self, ask(label) or (d and d.name) or k,
-                          (body and (body .. "\n\n") or "") .. "Click to edit it below.")
+                simpleTip(self, ask(label) or (d and d.name) or k, body, { { "Click", "edit it below" } })
             end
         end)
         b:SetScript("OnLeave", function(self)

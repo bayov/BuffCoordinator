@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.4
+
+### Changed
+
+- Whispers go out only inside a dungeon or raid, and only to buffers in there with you.
+- A "missing on" whisper names only players inside. A buffer who comes in later hears their assignments then.
+
+### Fixed
+
+- Hovering a target debuff in combat no longer throws a Lua error.
+
 ## 0.2.3
 
 ### Changed

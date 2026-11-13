@@ -513,6 +513,46 @@ function R.close(m)
     return not me or R.near(me, m)
 end
 
+-- Whether we're inside a dungeon or a raid.
+function R.inInstance()
+    if not _G.IsInInstance then return false end
+    local inside, kind = IsInInstance()
+    return inside and (kind == "party" or kind == "raid") or false
+end
+
+-- Whether maps `a` and `b` are the same place, or floors of one dungeon.
+local function samePlace(a, b)
+    if a == b then return true end
+    local M = _G.C_Map
+    if not (M and M.GetMapGroupID) then return false end
+    local ga, gb = M.GetMapGroupID(a), M.GetMapGroupID(b)
+    return readable(ga) and readable(gb) and ga ~= nil and ga ~= 0 and ga == gb or false
+end
+
+-- Whether player `m` is inside the dungeon or raid we're in. False when
+-- we're not in one.
+--
+-- Someone we can see is in here with us. In a raid the roster says each
+-- player's zone. In a party we compare maps, and the floors of one dungeon
+-- count as one place. When the game tells us nothing we say no, so a
+-- whisper waits rather than reach a player who is still outside.
+function R.inside(m)
+    if not R.inInstance() then return false end
+    if m.me then return true end
+    if not m.online then return false end
+    local unit = m.unit
+    if type(unit) ~= "string" then return false end
+    if _G.UnitIsVisible then
+        local vis = UnitIsVisible(unit)
+        if readable(vis) and vis then return true end
+    end
+    local me = R.me()
+    if m.zone and me and me.zone then return m.zone == me.zone end
+    local am, bm = mapOf("player"), mapOf(unit)
+    if am and bm then return samePlace(am, bm) end
+    return false
+end
+
 -- What we know of player `name`, here or not: { name, class, spec }. One
 -- who isn't here is someone we grouped with before, or a player of the
 -- plan in use, made up or real.

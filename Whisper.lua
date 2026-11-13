@@ -26,6 +26,12 @@
 -- so a list of assignments or a ready check would only be noise. The button, a
 -- nudge and "!bc" still answer, since someone asked.
 --
+-- We only whisper on our own inside a dungeon or raid, and only to givers
+-- who are in there with us (R.inside, Roster.lua). A missing line names only
+-- the players in there too. A giver who comes in later hears their list
+-- then. Outside, players are questing or on their way, and a whisper about
+-- buffs is only noise (the user asked for this).
+--
 -- We never whisper a player the same text twice within a minute on our own,
 -- like on two ready checks in a row. A nudge, the button and "!bc" are
 -- asked for, so they always go out.
@@ -165,8 +171,10 @@ function W.missingText(a)
     local long = a.bless or (a.buff and a.buff.kind == "long")
     if not long or a.spare then return nil end
     local order, byBuff = {}, {}
+    -- Inside a dungeon or raid, a player still outside can't be buffed.
+    local inst = R.inInstance()
     for _, t in ipairs(Tr.status(a).missing) do
-        if not t.soon then
+        if not t.soon and (not inst or R.inside(t.m)) then
             local list = byBuff[t.b.id]
             if not list then
                 list = { b = t.b }
@@ -292,10 +300,10 @@ local function queue(name, text, fresh, to)
     return true
 end
 
--- Whether we may whisper on our own: we run the board and the setting
--- `key` is on.
+-- Whether we may whisper on our own: we run the board, the setting `key`
+-- is on and we're inside a dungeon or raid.
 function W.allowed(key)
-    return O.get(key) and S.isHost() and true or false
+    return O.get(key) and S.isHost() and R.inInstance() and true or false
 end
 
 -- The first time we whisper in a group, we say so.
@@ -338,7 +346,8 @@ function W.all(again, force)
     kept()
     local n = 0
     for _, m in ipairs(R.list()) do
-        if not m.me and m.online and not S.hasAddon(m.name) then
+        -- One still outside hears it when they come in (the ticker below).
+        if not m.me and m.online and not S.hasAddon(m.name) and (force or R.inside(m)) then
             local text = W.text(m.name)
             if text and (again or said[m.name] ~= text) then
                 said[m.name] = text
@@ -406,7 +415,7 @@ function W.ready()
         local plan = Du.plan(job.id)
         for _, a in ipairs(plan and plan.active and plan.list or {}) do
             local g = a.giver
-            if not g.me and g.online and not S.hasAddon(g.name) and R.close(g) then
+            if not g.me and g.online and not S.hasAddon(g.name) and R.close(g) and R.inside(g) then
                 local text = W.missingText(a)
                 if text then
                     if not texts[g.name] then order[#order + 1] = g.name end
@@ -588,13 +597,13 @@ function W.expiry()
     if party then at = math.min(at, PARTY_SOON) end
     for name, list in pairs(expiryGivers()) do
         local g = list.giver
-        local near = R.close(g)
+        local near = R.close(g) and R.inside(g)
         for _, a in ipairs(near and list or NONE) do
             for _, t in ipairs(Du.targets(a)) do
                 -- In a party what they have may be another blessing than
                 -- the plan's, and that's the one to warn about.
                 local m, s, b = t.m, nil, t.b
-                if not m.dead and R.close(m) then s, b = Tr.standIn(a, m, t.b) end
+                if not m.dead and R.close(m) and R.inside(m) then s, b = Tr.standIn(a, m, t.b) end
                 local key = name .. "\t" .. b.id .. "\t" .. m.name
                 local w = watch[key]
                 if s and s.up and s.expires > 0 then
@@ -671,8 +680,12 @@ end
 
 -- Each board change starts the wait over, and only the last one whispers.
 local boardChanges = 0
+-- When the board last changed, so the ticker doesn't whisper a list that's
+-- still settling.
+local boardAt = 0
 NS.listen("board", function()
     boardChanges = boardChanges + 1
+    boardAt = GetTime()
     local mine = boardChanges
     C_Timer.After(BOARD_WAIT, function()
         if mine == boardChanges then W.all(false) end
@@ -719,7 +732,12 @@ NS.listen("loaded", function()
 end)
 NS.listen("login", function()
     if not R.real.grouped() then forget() end
-    C_Timer.NewTicker(EXPIRY_EVERY, function() W.expiry() end)
+    C_Timer.NewTicker(EXPIRY_EVERY, function()
+        -- Givers who just came into the dungeon hear their assignments.
+        -- W.all only whispers those whose list is new to them.
+        if not InCombatLockdown() and GetTime() - boardAt >= BOARD_WAIT then W.all(false) end
+        W.expiry()
+    end)
 end)
 
 NS.command("whisper", "whisper players without the addon their assignments", function() W.request() end)

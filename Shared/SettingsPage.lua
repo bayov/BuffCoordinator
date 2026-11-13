@@ -205,11 +205,12 @@ local function hideTooltip()
     if GameTooltip then GameTooltip:Hide() end
 end
 
-local function simpleTip(owner, title, text)
+local function simpleTip(owner, title, text, hints)
     if not GameTooltip then return end
     GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
     GameTooltip:AddLine(title, 1, 1, 1)
     if text then GameTooltip:AddLine(text, GREY[1], GREY[2], GREY[3], true) end
+    T.tipHints(GameTooltip, hints)
     GameTooltip:Show()
 end
 SP.simpleTip, SP.hideTooltip = simpleTip, hideTooltip
@@ -283,13 +284,12 @@ local function newRow(parent, panel, key, decl)
                                   where and (" in " .. where) or "")
             if a.inherits(key) then
                 simpleTip(self, "Follows " .. (where or "the shared setting"),
-                          format("This uses %s, now %s. Click to keep it as its own, or type"
-                                 .. " a value%s.", shared, a.format(decl.inherit),
-                                 row.slider and " or move the slider" or ""))
+                          format("This uses %s, now %s. Type a value%s to keep one of its own.", shared,
+                                 a.format(decl.inherit), row.slider and " or move the slider" or ""),
+                          { { "Click", "keep it as its own" } })
             else
-                simpleTip(self, "Its own value",
-                          format("Click to follow %s again, now %s.", shared,
-                                 a.format(decl.inherit)))
+                simpleTip(self, "Its own value", format("%s is %s now.", shared, a.format(decl.inherit)),
+                          { { "Click", "follow it again" } })
             end
         end)
         own:SetScript("OnLeave", leave)
