@@ -32,6 +32,11 @@
 -- then. Outside, players are questing or on their way, and a whisper about
 -- buffs is only noise (the user asked for this).
 --
+-- A giver under half mana doesn't hear from us on our own, for a minute at
+-- least (W.resting). That's most often after a wipe, while they drink, and
+-- being told what's missing then only hurries them (the user asked for
+-- this). What we'd have said waits until they're back over half.
+--
 -- We never whisper a player the same text twice within a minute on our own,
 -- like on two ready checks in a row. A nudge, the button and "!bc" are
 -- asked for, so they always go out.
@@ -300,6 +305,36 @@ local function queue(name, text, fresh, to)
     return true
 end
 
+-- Under this share of their mana a giver is resting.
+local LOW_MANA = 0.5
+-- How long a giver we saw resting rests at least.
+local REST = 60
+-- When we first saw each giver under half mana, by name.
+local lowAt = {}
+
+-- Whether giver `m` is resting, so we don't whisper them on our own: under
+-- half mana now, or less than a minute since we first saw them under half.
+-- Rage and energy don't count, and one whose mana the game hides isn't
+-- resting.
+function W.resting(m)
+    local unit, low = m.unit, false
+    if type(unit) == "string" and _G.UnitPower and _G.UnitPowerMax then
+        local cur, max = UnitPower(unit, 0), UnitPowerMax(unit, 0)
+        if not NS.secret(cur) and not NS.secret(max) and type(cur) == "number" and type(max) == "number"
+           and max > 0 then
+            low = cur < max * LOW_MANA
+        end
+    end
+    local now, at = GetTime(), lowAt[m.name]
+    if low then
+        lowAt[m.name] = at or now
+        return true
+    end
+    if at and now - at < REST then return true end
+    lowAt[m.name] = nil
+    return false
+end
+
 -- Whether we may whisper on our own: we run the board, the setting `key`
 -- is on and we're inside a dungeon or raid.
 function W.allowed(key)
@@ -347,7 +382,7 @@ function W.all(again, force)
     local n = 0
     for _, m in ipairs(R.list()) do
         -- One still outside hears it when they come in (the ticker below).
-        if not m.me and m.online and not S.hasAddon(m.name) and (force or R.inside(m)) then
+        if not m.me and m.online and not S.hasAddon(m.name) and (force or R.inside(m) and not W.resting(m)) then
             local text = W.text(m.name)
             if text and (again or said[m.name] ~= text) then
                 said[m.name] = text
@@ -415,7 +450,8 @@ function W.ready()
         local plan = Du.plan(job.id)
         for _, a in ipairs(plan and plan.active and plan.list or {}) do
             local g = a.giver
-            if not g.me and g.online and not S.hasAddon(g.name) and R.close(g) and R.inside(g) then
+            if not g.me and g.online and not S.hasAddon(g.name) and R.close(g) and R.inside(g)
+               and not W.resting(g) then
                 local text = W.missingText(a)
                 if text then
                     if not texts[g.name] then order[#order + 1] = g.name end
@@ -595,8 +631,11 @@ function W.expiry()
     local seen, due = {}, {}
     local party = Tr.party()
     if party then at = math.min(at, PARTY_SOON) end
-    for name, list in pairs(expiryGivers()) do
+    local givers = expiryGivers()
+    for name, list in pairs(givers) do
         local g = list.giver
+        -- Every tick, so a giver who ran low between whispers rests too.
+        W.resting(g)
         local near = R.close(g) and R.inside(g)
         for _, a in ipairs(near and list or NONE) do
             for _, t in ipairs(Du.targets(a)) do
@@ -649,7 +688,9 @@ function W.expiry()
     end
     local n = 0
     for name in pairs(due) do
-        if not expiryAt[name] or now - expiryAt[name] >= EXPIRY_GAP then
+        -- A resting giver hears it all once they're back over half.
+        local resting = givers[name] and W.resting(givers[name].giver)
+        if not resting and (not expiryAt[name] or now - expiryAt[name] >= EXPIRY_GAP) then
             local list, giver = {}, nil
             for key, w in pairs(watch) do
                 if w.g.name == name then
@@ -711,6 +752,7 @@ NS.on("GROUP_LEFT", function()
     for k in pairs(nudged) do nudged[k] = nil end
     for k in pairs(watch) do watch[k] = nil end
     for k in pairs(expiryAt) do expiryAt[k] = nil end
+    for k in pairs(lowAt) do lowAt[k] = nil end
     for i = #outbox, 1, -1 do outbox[i] = nil end
     told, W.forced, W.pending = false, false, false
 end)

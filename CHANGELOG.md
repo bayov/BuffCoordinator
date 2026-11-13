@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.5
+
+### Changed
+
+- A buffer under half mana isn't whispered for at least a minute, so they can drink after a wipe. Clicking a buff to whisper its buffer still works.
+
 ## 0.2.4
 
 ### Changed
