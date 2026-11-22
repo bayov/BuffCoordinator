@@ -132,7 +132,7 @@ local drag
 
 local function ghost()
     if ghostFrame then return ghostFrame end
-    local g = CreateFrame("Frame", nil, UIParent)
+    local g = CreateFrame("Frame", "BuffCoordinatorPriorityGhost", UIParent)
     g:SetFrameStrata("TOOLTIP")
     g:SetSize(ICON, ICON)
     g.icon = T.icon(g, nil, ICON)

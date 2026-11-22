@@ -18,8 +18,7 @@ NS.Util = U
 -- Forever hides some values from addons in combat, like counts and names.
 -- They come back as "secret" values that we may pass on to the game but
 -- never read or compare, and comparing one is an error. We look the game's
--- test up on each call, so a client that doesn't have it (anniversary) only
--- ever says no.
+-- test up on each call, so a client that doesn't have it only ever says no.
 function U.secret(v)
     local is = _G.issecretvalue
     return is ~= nil and is(v) == true
@@ -31,8 +30,7 @@ end
 -- hidden aura isn't just an error we can catch. The game also logs a
 -- LUA_WARNING that blames BayovCore ("Auras cannot be accessed when secret"),
 -- and it shows up in BugSack under whatever Blizzard code was running, like
--- Edit Mode's layout pass. Anniversary has no C_Secrets, so there it's never
--- hidden.
+-- Edit Mode's layout pass. A client without C_Secrets never hides one.
 function U.auraHidden(unit, index, filter)
     local sec = _G.C_Secrets
     local ask = sec and sec.ShouldUnitAuraIndexBeSecret
@@ -78,6 +76,16 @@ end
 function U.loaded(addon)
     local is = (_G.C_AddOns and _G.C_AddOns.IsAddOnLoaded) or _G.IsAddOnLoaded
     return is ~= nil and is(addon) and true or false
+end
+
+-- =============================================================
+-- Tooltips
+-- =============================================================
+-- Hides the game's tooltip, as an OnLeave does after an OnEnter that showed
+-- it.
+function U.untip()
+    local tip = _G.GameTooltip
+    if tip then tip:Hide() end
 end
 
 -- =============================================================

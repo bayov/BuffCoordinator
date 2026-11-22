@@ -1,8 +1,7 @@
 -- Options -- everything that ACTS on a declaration table, and not one option.
 --
--- BayovRotation/Options.lua opens by counting twenty-nine defaults written
--- twice and replacing them with one row that four consumers read. This file is
--- the same argument one level up. Reading a row -- parse the text, clamp it,
+-- A declaration table replaces defaults written twice with one row that every
+-- consumer reads. This file is the same argument one level up. Reading a row -- parse the text, clamp it,
 -- store a default as an absence, print what a key is for, generate a console
 -- verb per key, hand Panel.lua an adapter -- is not a fact about the rotation,
 -- and this addon has modules of its own that each wanted all of it.
@@ -37,8 +36,8 @@
 --   values    for an enum: a list, or a function that answers one (Buff
 --             Coordinator's fonts, which come from LibSharedMedia).
 --   group     orders the console listing and names the panel's page. NOT a
---             namespace -- keys are flat, because `/bayov enemy ttl.tau 3` is
---             a worse thing to type than `/bayov enemy ttlTau 3` and the
+--             namespace -- keys are flat, because `/bayov export rec.keep 3`
+--             is a worse thing to type than `/bayov export keepDays 3` and the
 --             grouping is only ever read.
 --   name      what the settings page heads the row with. The KEY stays the
 --             identity everywhere else, and the page shows it too, spelled as
@@ -93,6 +92,18 @@
 --   pos       on an X key, the Y key it pairs with. The page draws one
 --             position row with Move and Reset for the pair, and the two
 --             numbers go under Advanced.
+--   row       false: no row on the settings page. The option stays declared,
+--             saved and on the console; a window of its own sets it instead,
+--             like Gear Sets' swap rules. `window` names that window (its id
+--             in WindowKit's registry), and config search opens it there.
+--             A key a window's own page draws (`page`, like Supplies' role)
+--             names it with `window` too. Config's page for the module then
+--             has a "Set in <window>" link with the changed mark while any
+--             of them is changed. A module's changes that aren't settings
+--             and live in a window get the same link from `windows` on its
+--             adapter: { [window id] = { edits, open, group } }, where
+--             `edits()` counts them, `open()` opens the right page of the
+--             window, and `group` is the tab the link goes on.
 --
 -- ---------------------------------------------------------------------
 -- WHAT A CONSUMER SUPPLIES
@@ -105,6 +116,11 @@
 --   sectionTitles, sectionNotes
 --             what the page heads a section with when it isn't the
 --             section's own name, and a dim line under the heading
+--   kept      keys this module no longer declares but still holds until
+--             another module moves them over on load, like the alert
+--             settings that went from Supplies to the Checklist. A prune
+--             (here or bayovui/build/prune.py) leaves them alone, so an
+--             account nobody logged into since keeps its values.
 --   store     a function that answers the table holding `opts`, read on
 --             every access, for a consumer whose store isn't there yet when
 --             it declares (Buff Coordinator's NS.db). Without it, `bind`.
@@ -113,8 +129,8 @@
 --             past the end still lands on it.
 --   apply     called after a set that took, with (key, value). What "the
 --             consumer now reads this" means is its own business: the rotation
---             rebuilds its engine, the enemy module re-reads its upvalues and
---             restarts a ticker.
+--             rebuilds its engine, and Export turns the combat log on right
+--             away.
 --   refuse    a sentence when a set must not happen at all, nil when it may.
 --             The rotation refuses in combat, because a rebuild there costs it
 --             the live GCD reading and the immunity mirror. A module that
@@ -124,10 +140,9 @@
 --   visible   whether a row is this CHARACTER'S at all, nil when every row is.
 --             Not the same question as `refuse`: a refused set is one that
 --             cannot happen now, an invisible row is one that was never on
---             offer here. BayovRotation declares one table holding every spec
---             it ships -- a shaman's rotation options and a paladin's -- and
---             answers no to the ones belonging to another class, so neither
---             the console listing nor the settings page offers a setting that
+--             offer here. A table can hold every class's rows and answer
+--             no to the ones belonging to another class, so neither the
+--             console listing nor the settings page offers a setting that
 --             would do nothing. An invisible row keeps whatever a character
 --             stored under it: this hides a row, it does not delete one.
 --
@@ -199,7 +214,7 @@ function Options.new(spec)
     -- Reading and writing
     -- =========================================================
     -- `store.opts` is where every value lives, so a module's other keys -- the
-    -- immunity log's mobs, the swing ring's sessions -- are never something a
+    -- Export's characters, the Profiler's sessions -- are never something a
     -- key collision could reach.
     function o.bind(s)
         bound = s
@@ -282,10 +297,9 @@ function Options.new(spec)
     -- `all` includes them anyway, and it is not a hole in the rule above --
     -- it is the rule read exactly. Visibility is about what may be READ AND
     -- SET by whoever is logged in, which is a different question from what an
-    -- engine needs in order to run at all. BayovRotation asks for it when it
-    -- loads another class's rotation to demonstrate: the character may not
-    -- touch one of those numbers, and the engine still cannot start without
-    -- every one of them.
+    -- engine needs in order to run at all. An engine that loads another
+    -- class's rows still needs every one of them, though the character may
+    -- not touch them.
     function o.resolved(all)
         local t = {}
         for key in pairs(decls) do
@@ -392,8 +406,11 @@ function Options.new(spec)
         local s = S()
         if not (s and s.opts) then return 0 end
         local n = 0
+        local kept = spec.kept or {}
         for k, v in pairs(s.opts) do
-            if not decls[k] or (v == o.default(k) and not follower(k)) then
+            if kept[k] then
+                -- Not ours to clear (spec.kept).
+            elseif not decls[k] or (v == o.default(k) and not follower(k)) then
                 s.opts[k] = nil
                 n = n + 1
             end
@@ -521,7 +538,7 @@ function Options.new(spec)
 
     -- One verb per option key, generated, plus `list` and `reset`. The
     -- alternative is a fallback hook in Core.lua's dispatcher, and a table of
-    -- names it can see is worth more than one it cannot -- `/bayov enemy` with
+    -- names it can see is worth more than one it cannot -- `/bayov export` with
     -- a typo names the option it thinks you meant, which a catch-all cannot
     -- do.
     --
@@ -671,7 +688,7 @@ end
 -- others'. Two modules may not declare the same key, because then a row
 -- couldn't say whose it is.
 --
--- `extras`, `edits` and `editLines` are read when they're asked for rather
+-- `extras`, `edits`, `editLines` and `windows` are read when they're asked for rather
 -- than copied now, because a module may hang them off its adapter after this
 -- runs.
 function Options.join(...)
@@ -749,6 +766,24 @@ function Options.join(...)
                 end
                 return lines
             end
+        elseif k == "windows" then
+            -- Each part's windows (SettingsPage's links). Two parts with
+            -- changes in one window count both.
+            local all
+            for _, a in ipairs(parts) do
+                for id, spec in pairs(a.windows or {}) do
+                    all = all or {}
+                    local had = all[id]
+                    if had and had.edits and spec.edits then
+                        local e1, e2 = had.edits, spec.edits
+                        all[id] = setmetatable({ edits = function() return (e1() or 0) + (e2() or 0) end },
+                                               { __index = had })
+                    else
+                        all[id] = had or spec
+                    end
+                end
+            end
+            return all
         end
     end })
 end

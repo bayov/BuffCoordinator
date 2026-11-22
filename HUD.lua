@@ -1313,6 +1313,8 @@ local function autoTooltip(f)
         tip:AddLine("Next: " .. auto.combatFixed, 1, 1, 1)
     elseif combat and auto.blocked then
         tip:AddLine(BLOCKED_LINE, IDLE[1], IDLE[2], IDLE[3], true)
+    elseif n and n.class then
+        tip:AddLine(format("Next: %s on %s", n.spell, classWord(n.class)), 1, 1, 1)
     elseif n and n.m then
         local what = n.spell
         if n.cast and n.cast ~= n.spell and n.rank then

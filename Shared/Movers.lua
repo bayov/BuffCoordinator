@@ -311,7 +311,9 @@ end
 
 local function newBox(d)
     local T = NS.Theme
-    local b = CreateFrame("Frame", nil, UIParent)
+    local name = tostring(d.key):gsub("%W", "")
+    name = name:gsub("^%l", string.upper)
+    local b = CreateFrame("Frame", ADDON .. "Mover" .. name, UIParent)
     b:SetFrameStrata("DIALOG")
     b:EnableMouse(true)
     b:RegisterForDrag("LeftButton")

@@ -2752,13 +2752,14 @@ end
 -- order, Du.blessOrder) as there are paladins, one from each. With two
 -- paladins a mage gets Kings and Wisdom, with one only Kings.
 --
--- Forever has no Greater Blessings, so every blessing is a cast on one
--- player. Still, each paladin gives one blessing to each whole class where
--- it can (the blessings most of the class wants), so their clicking stays
--- simple and the whispers short. A player of the class who wants another
--- one gets it from a paladin as well. So if every shaman but one wants
--- Wisdom, one paladin gives the shamans Wisdom and the Enhancement shaman
--- Might.
+-- Each paladin gives one blessing to each whole class where it can (the
+-- blessings most of the class wants), so a Greater Blessing puts it on the
+-- class in one cast (Buffer.lua), and the whispers stay short. A player of
+-- the class who wants another one gets it from a paladin as a single
+-- blessing after the Greater one. So if every shaman but one wants Wisdom,
+-- one paladin puts Greater Blessing of Wisdom on the shamans and then
+-- Blessing of Might on the Enhancement shaman. A paladin who hasn't trained
+-- the Greater one yet gives single blessings to the same players.
 --
 -- Each paladin also keeps to one blessing across classes where it can (the
 -- one the raid wants most from it), so the first paladin is Kings for

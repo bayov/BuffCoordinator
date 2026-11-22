@@ -49,9 +49,7 @@ local function rightClicked(...)
     return false
 end
 
-local function hideTip()
-    if GameTooltip then GameTooltip:Hide() end
-end
+local hideTip = NS.Util.untip
 
 -- Our line in the addon compartment (the drawer under the calendar), on the
 -- clients that have one.

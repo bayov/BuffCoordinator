@@ -46,6 +46,12 @@
 --   group     for a long buff, its group version (Prayer of Fortitude). On
 --             Forever it reaches every raid member within 100 yards of the
 --             caster, so one cast buffs the whole raid.
+--   greater   for a blessing, its Greater Blessing, which puts it on every
+--             raid member of the target's class within 100 yards. We cast it
+--             on a class when two or more of them miss the blessing we give
+--             the class (Buffer.lua). Like a `group` it gets ranks of its own
+--             (buffranks.py), so Greater Blessing of Might rank 1 reads as
+--             the Might of level 52 and not as rank 1.
 --   optional  its duty is off unless turned on
 --   aura      an aura: nobody casts it on anyone. The giver only keeps it up
 --             (talented, in a form, or turned on), so its duty is whether the
@@ -280,7 +286,7 @@ D.BLESSING_ORDER = {
 -- vanilla doesn't. The rest are vanilla's, and we learn more from what we
 -- read on players.
 -- The durations are the client's.
--- source: EllesmereUI_BuffPresets.lua and vanilla spell data 1.60.1.70755
+-- source: EllesmereUI_BuffPresets.lua and vanilla spell data 1.60.1.71037
 D.BUFFS = {
     -- Long buffs
     { id = "fortitude", name = "Power Word: Fortitude", class = "PRIEST", kind = "long",
@@ -309,26 +315,43 @@ D.BUFFS = {
       icon = [[Interface\Icons\Spell_Shadow_AntiShadow]], optional = true,
       spells = { 976, 10957, 10958, 27683 }, names = { 27683 }, group = 27683, wants = { "all" },
       duration = 600 },
+    -- Rank 4 is up to 225 more healing taken, but also up to 113 more
+    -- damage taken from each spell. So it's for a tank on a fight of
+    -- physical hits, and off unless turned on.
+    -- source: wago SpellEffect 10170 1.60.1.71037
+    { id = "amplify", name = "Amplify Magic", class = "MAGE", kind = "long",
+      icon = [[Interface\Icons\Spell_Holy_FlashHeal]], optional = true,
+      spells = { 1008, 8455, 10169, 10170 }, wants = { "tank" }, duration = 600 },
     { id = "thorns", name = "Thorns", class = "DRUID", kind = "long",
       icon = [[Interface\Icons\Spell_Nature_Thorns]],
       spells = { 467, 782, 1075, 8914, 9756, 9910, 15438, 16877, 21335, 21337, 22128, 22351,
                  22696, 25640, 25777, 438294, 438326, 1213813, 1213816, 1213834, 1236308,
                  1291338, 1312955 }, wants = { "tank" }, duration = 600 },
 
-    -- The blessings. Forever has no Greater Blessings: a blessing lasts an
-    -- hour and goes on one player. 1213408 is the Forever client's own
+    -- The blessings. Each lasts an hour. 1213408 is the Forever client's own
     -- copy of Kings.
+    --
+    -- A paladin trains the Greater Blessings at 52 (Might), 54 (Wisdom) and
+    -- 60 (Kings). One cast puts the blessing on everyone of the target's
+    -- class in the raid within 100 yards, for an hour, and it takes a Symbol
+    -- of Kings. It's the same buff, so it counts as the blessing. Its spells
+    -- are last in each list, so the first spell (the name and icon we show)
+    -- stays the one-player blessing.
+    -- source: wago Spell, SpellEffect, SpellReagents and SkillLineAbility
+    -- 25898, 25782, 25916, 25894, 25918 1.60.1.71037, and Wowhead's Forever
+    -- trainer
     { id = "kings", name = "Blessing of Kings", class = "PALADIN", kind = "long",
       family = "blessing", icon = [[Interface\Icons\Spell_Magic_MageArmor]],
-      spells = { 20217, 1213408 }, wants = { "all" }, duration = 3600, camp = "Fish Bowl" },
+      spells = { 20217, 1213408, 25898 }, names = { 25898 }, greater = 25898,
+      wants = { "all" }, duration = 3600, camp = "Fish Bowl" },
     { id = "might", name = "Blessing of Might", class = "PALADIN", kind = "long",
       family = "blessing", icon = [[Interface\Icons\Spell_Holy_FistOfJustice]],
-      spells = { 19740, 19834, 19835, 19836, 19837, 19838, 25291 },
-      wants = { "melee" }, duration = 3600, camp = "Lodestone" },
+      spells = { 19740, 19834, 19835, 19836, 19837, 19838, 25291, 25782, 25916 },
+      names = { 25782 }, greater = 25782, wants = { "melee" }, duration = 3600, camp = "Lodestone" },
     { id = "wisdom", name = "Blessing of Wisdom", class = "PALADIN", kind = "long",
       family = "blessing", icon = [[Interface\Icons\Spell_Holy_SealOfWisdom]],
-      spells = { 19742, 19850, 19852, 19853, 19854, 25290 },
-      wants = { "mana" }, duration = 3600, camp = "Mana Well" },
+      spells = { 19742, 19850, 19852, 19853, 19854, 25290, 25894, 25918 },
+      names = { 25894 }, greater = 25894, wants = { "mana" }, duration = 3600, camp = "Mana Well" },
     -- The 2026-10-30 hotfix took Salvation, Mass Salvation and Blessing of
     -- Light away from paladins, though the client still lists them, and the
     -- 2026-11-02 development notes made it final. The tanks' own threat went
@@ -354,6 +377,11 @@ D.BUFFS = {
     -- Windfury down, Flametongue only helps the players who don't take
     -- Windfury: an Enhancement shaman, whose own Windfury Weapon is in its
     -- place.
+    --
+    -- Windfury and Flametongue Totem put a buff of the totem's own name on
+    -- players, but with other spell IDs than the totem's (8515 for Windfury
+    -- rank 1). Those come after the totems' IDs, so the game's aura display
+    -- finds them in combat too.
     { id = "strengthofearth", name = "Strength of Earth", class = "SHAMAN", kind = "short",
       element = "earth", cast = 8075, icon = [[Interface\Icons\Spell_Nature_EarthBindTotem]],
       spells = { 8076, 8162, 8163, 10441, 25362 }, names = { 8075 }, wants = { "melee" },
@@ -366,7 +394,8 @@ D.BUFFS = {
       ask = "Stoneskin Totem" },
     { id = "flametongue", name = "Flametongue Totem", class = "SHAMAN", kind = "short",
       element = "fire", excludes = "windfury", icon = [[Interface\Icons\Spell_Nature_GuardianWard]],
-      spells = { 8227, 8249, 10526, 16387 }, wants = { "melee" }, duration = 300 },
+      spells = { 8227, 8249, 10526, 16387, 8230, 8250, 10521, 15036 }, wants = { "melee" },
+      duration = 300 },
     { id = "manaspring", name = "Mana Spring", class = "SHAMAN", kind = "short", party = true,
       element = "water", cast = 5675, icon = [[Interface\Icons\Spell_Nature_ManaRegenTotem]],
       spells = { 5677, 10491, 10493, 10494 }, names = { 5675 }, wants = { "mana" }, duration = 300,
@@ -377,7 +406,8 @@ D.BUFFS = {
       ask = "Healing Stream Totem" },
     { id = "windfury", name = "Windfury Totem", class = "SHAMAN", kind = "short",
       element = "air", excludes = "flametongue", icon = [[Interface\Icons\Spell_Nature_Windfury]],
-      spells = { 8512, 10613, 10614 }, wants = { "melee" }, duration = 300, unwanted = { "imbue" } },
+      spells = { 8512, 10613, 10614, 8515, 10609, 10612 }, wants = { "melee" }, duration = 300,
+      unwanted = { "imbue" } },
     -- Agility is attack power and crit for melee and hunters alike.
     { id = "graceofair", name = "Grace of Air", class = "SHAMAN", kind = "short",
       element = "air", cast = 8835, icon = [[Interface\Icons\Spell_Nature_InvisibilityTotem]],
@@ -460,7 +490,10 @@ D.BUFFS = {
 -- =============================================================
 -- Debuffs on the target
 -- =============================================================
--- source: vanilla spell data 1.60.1.70755
+-- The Forever client has its own copies of Curse of Recklessness rank 4
+-- (1225841) and Hunter's Mark rank 4 (1213268), with vanilla's numbers.
+-- They're the same debuff on the target, so they count.
+-- source: vanilla spell data 1.60.1.71037
 D.DEBUFFS = {
     { id = "sunder", name = "Sunder Armor", class = "WARRIOR", family = "armor", stacks = 5,
       icon = [[Interface\Icons\Ability_Warrior_Sunder]],
@@ -475,7 +508,7 @@ D.DEBUFFS = {
     { id = "recklessness", name = "Curse of Recklessness", class = "WARLOCK", family = "curse",
       clash = "armorMinor",
       icon = [[Interface\Icons\Spell_Shadow_UnholyStrength]],
-      spells = { 704, 7658, 7659, 11717 }, benefits = { "physical" }, duration = 120 },
+      spells = { 704, 7658, 7659, 11717, 1225841 }, benefits = { "physical" }, duration = 120 },
     { id = "elements", name = "Curse of the Elements", class = "WARLOCK", family = "curse",
       icon = [[Interface\Icons\Spell_Shadow_ChillTouch]],
       spells = { 440892, 1311676, 1311677, 1311680 },
@@ -493,7 +526,7 @@ D.DEBUFFS = {
       spells = { 20185, 20344, 20345, 20346 }, benefits = { "melee" }, duration = 40 },
     { id = "huntersmark", name = "Hunter's Mark", class = "HUNTER",
       icon = [[Interface\Icons\Ability_Hunter_SniperShot]],
-      spells = { 1130, 14323, 14324, 14325 }, benefits = { "ranged" }, duration = 120 },
+      spells = { 1130, 14323, 14324, 14325, 1213268 }, benefits = { "ranged" }, duration = 120 },
     { id = "jocrusader", learn = "Seal of the Crusader", name = "Judgement of the Crusader", class = "PALADIN",
       family = "judgement", optional = true, icon = [[Interface\Icons\Spell_Holy_HolySmite]],
       spells = { 21183, 20188, 20300, 20301, 20302, 20303 }, benefits = { "holy" }, duration = 40 },
@@ -607,6 +640,7 @@ D.JOBS = {
     { id = "spirit", kind = "cover", section = "Long buffs", buff = "spirit" },
     { id = "shadowprot", kind = "cover", section = "Long buffs", buff = "shadowprot" },
     { id = "thorns", kind = "cover", section = "Long buffs", buff = "thorns" },
+    { id = "amplify", kind = "cover", section = "Long buffs", buff = "amplify" },
 
     { id = "battleshout", kind = "single", section = "Short buffs", buff = "battleshout",
       prefer = { "fury", "arms", "protection" } },

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.6
+
+### New
+
+- Greater Blessings are back. When 2 or more of a class miss your blessing, one click blesses the whole class. Players who get another blessing from you get it as a single one after. Needs a Symbol of Kings, and it's under Settings, Buffing.
+- A paladin who hasn't learned a Greater Blessing yet gives single ones.
+- Amplify Magic for tanks, off until you turn it on.
+
+### Fixed
+
+- A Greater Blessing counts as its blessing, and no longer says DOWNRANK.
+- No "no Sacred Candle" note before you've learned the group version of a buff.
+
 ## 0.2.5
 
 ### Changed

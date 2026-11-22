@@ -1112,7 +1112,7 @@ local function paintBoxes(lit, effect)
 end
 
 local function makeGhost()
-    ghost = CreateFrame("Frame", nil, UIParent)
+    ghost = CreateFrame("Frame", "BuffCoordinatorRaidGhost", UIParent)
     ghost:SetFrameStrata("TOOLTIP")
     ghost:SetSize(BOX_W - 8, ROW_H)
     ghost.bg = T.fill(ghost, { 0.08, 0.09, 0.11 }, 0.92)

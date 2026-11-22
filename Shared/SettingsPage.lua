@@ -57,6 +57,16 @@
 --   defaultGroup  the group of a declaration with none, "other" by default
 --   subTabs       the subs as tabs in the strip, rather than a selector
 --   sub, onSub    the sub to start on, and what hears when another is shown
+--   windowOf      for a page that can open windows (the config window's):
+--                 windowOf(id, spec) answers { title, icon, open } for the
+--                 window `id`, or nil when it isn't here. The page then has
+--                 a link to each window that holds some of its settings
+--                 (`window` on a declaration) or changes (`adapter.windows`,
+--                 { [id] = { edits, open, group } }), with the changed mark
+--                 while the window's edits are changed. A setting a window
+--                 holds never counts as changed: the user flips those as
+--                 they play (Auto Swap on or off), so only config's own
+--                 settings get the mark.
 --
 -- The page doesn't select a tab or fill its rows by itself. The caller does
 -- that, after it has hooked onSelect, onRefresh and the rest.
@@ -443,6 +453,9 @@ local function newRow(parent, panel, key, decl)
             r:HookScript("OnLeave", leave)
             row.slider = r
             row.ctrlW = row.ctrlW + Z.SLIDE + 10
+            -- Wider than a column is sized for, so the layout gives it the
+            -- whole line when its name wouldn't fit beside it.
+            row.wide = true
         end
 
         row.apply = function(self, value, enabled)
@@ -505,8 +518,8 @@ end
 -- back. The boxes behave like a number row's: Enter writes, and Escape or a
 -- click elsewhere puts the number back.
 --
--- A declaration with `noMove` has no Move button. BayovRotation's display
--- isn't in Movers, because you drag the display itself.
+-- A declaration with `noMove` has no Move button, for a widget that isn't in
+-- Movers because you drag the widget itself.
 local function newPosRow(parent, panel, xKey, yKey, decl)
     local row = CreateFrame("Frame", nil, parent)
     row:SetHeight(Z.ROW)
@@ -561,6 +574,9 @@ local function newPosRow(parent, panel, xKey, yKey, decl)
     row.reset.tip = function(b) simpleTip(b, "Reset", "Back to where it starts.") end
     row.ctrlW = 14 + Z.POS_EDIT + 10 + 14 + Z.POS_EDIT + 12 + Z.BUTTON
     if decl.noMove then row.move:Hide() else row.ctrlW = row.ctrlW + Z.BUTTON + 6 end
+    -- Two boxes and the buttons are wider than a column, so the layout
+    -- gives the row the whole line when they wouldn't fit beside its name.
+    row.wide, row.revW = true, 0
 
     row:EnableMouse(true)
     local function lightPreview(on)
@@ -642,6 +658,8 @@ local function newFold(parent, page, sub, onToggle)
     f:SetScript("OnClick", function(self)
         page.foldOpen = page.foldOpen or {}
         local k = sub or "_"
+        -- Folding keeps the page where it's scrolled (T.scroll's sf:hold).
+        if page.foldOpen[k] then T.holdScroll(self) end
         page.foldOpen[k] = not page.foldOpen[k]
         self:paint(true)
         onToggle()
@@ -678,9 +696,19 @@ SP.needsMet = needsMet
 -- A tab in a feature's strip
 -- =============================================================
 -- The word, and an accent underline under the one on show, the way EUI's
--- tabs look. They go left to right in the order they are made, because
--- BayovRotation's pages arrive after the generated ones.
+-- tabs look. They go left to right in the order they are made, so a module's
+-- own pages come after the generated ones.
+--
+-- A page made with `headTabs` (the config window) takes T.tab's header look
+-- instead: the sidebar's item on its side, flush, with the changed mark as
+-- its own badge (setMark).
 local function newTab(panel, name, title)
+    if panel.headTabs then
+        local b = T.tab(panel.strip, title or name, Z.TAB, { head = true })
+        panel.tabs[#panel.tabs + 1] = b
+        b:SetScript("OnClick", function() panel:select(name) end)
+        return b
+    end
     local b = CreateFrame("Button", nil, panel.strip)
     b:SetHeight(Z.TAB)
     b.label = T.text(b, T.SIZE.tab, true, T.A_DIM)
@@ -695,10 +723,7 @@ local function newTab(panel, name, title)
     b.selected:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", -8, 0)
     b.selected:Hide()
 
-    b.mark = T.text(b, Z.MARK_FONT, true, 1)
-    b.mark:SetPoint("LEFT", b.label, "RIGHT", 2, 2)
-    b.mark:SetText(T.MARK)
-    b.mark:Hide()
+    T.tabMark(b, 30)
 
     local w = floor((b.label:GetStringWidth() or 40) + 30)
     b:SetWidth(w)
@@ -718,6 +743,15 @@ local function newTab(panel, name, title)
     end)
     b:SetScript("OnClick", function() panel:select(name) end)
     return b
+end
+
+-- Shows or hides a tab's changed mark. A tab grows with its mark, so the
+-- strip is placed again once the marks are set (mt:rewrap).
+local function setMark(panel, b, on)
+    on = on and true or false
+    if (b.mark:IsShown() and true or false) == on then return end
+    b:setChanged(on)
+    panel.tabsMoved = true
 end
 
 -- =============================================================
@@ -746,7 +780,9 @@ function mt:optionRow(page, key)
     return row
 end
 
-function mt:select(name)
+-- With `quiet` it leaves the layout to the caller, which lays the page out
+-- right after anyway (Panel.build for a page about to be shown).
+function mt:select(name, quiet)
     self.current = name
     self.aboutShown = nil
     for _, page in ipairs(self.pages) do
@@ -762,7 +798,7 @@ function mt:select(name)
         self.aboutTab:light(false)
     end
     self.scroll:Show()
-    self:layout()
+    if not quiet then self:layout() end
     if self.scroll.setScroll then self.scroll:setScroll(0) end
     if self.onSelect then self.onSelect() end
 end
@@ -830,7 +866,7 @@ function mt:wrapTabs()
             if x > 0 and x + b:GetWidth() > room then x, line = 0, line + 1 end
             b:ClearAllPoints()
             b:SetPoint("TOPLEFT", self.strip, "TOPLEFT", x, -line * Z.TAB)
-            x = x + b:GetWidth() + 2
+            x = x + b:GetWidth() + (self.headTabs and 0 or 2)
         end
     end
     local h = (line + 1) * Z.TAB
@@ -839,6 +875,13 @@ function mt:wrapTabs()
     self.strip:SetHeight(h)
     self:setTop(self.topExtra)
     if self.onTabLines then self.onTabLines() end
+end
+
+-- Places the tabs again when a header tab's mark changed its width.
+function mt:rewrap()
+    if not self.tabsMoved then return end
+    self.tabsMoved = nil
+    self:wrapTabs()
 end
 
 -- A module's own button at the top right, on every tab, like Supplies'
@@ -875,6 +918,14 @@ function mt:showAbout()
     if self.onSelect then self.onSelect() end
 end
 
+-- Whether `key` is a setting a window holds (`window` on its declaration),
+-- like Gear Sets' Auto Swap switch. Those are the player's to flip while they
+-- play rather than config, so they never count as changed.
+local function heldByWindow(a, key)
+    local decl = a.decls[key]
+    return decl ~= nil and decl.window ~= nil
+end
+
 -- The settings this character has changed, in the order the page shows them.
 --
 -- Listed by setting rather than by row, so a setting with two rows (an extra
@@ -887,7 +938,7 @@ function mt:changedKeys()
     local a, keys, seen = self.adapter, {}, {}
     local function add(key)
         if not seen[key] and (not a.visible or a.visible(key))
-           and not a.isDefault(key) then
+           and not heldByWindow(a, key) and not a.isDefault(key) then
             keys[#keys + 1] = key
         end
         seen[key] = true
@@ -913,7 +964,7 @@ local NONE = {}
 
 -- Whether `key` counts as a changed setting.
 local function isChanged(a, key)
-    return (not a.visible or a.visible(key)) and not a.isDefault(key)
+    return (not a.visible or a.visible(key)) and not heldByWindow(a, key) and not a.isDefault(key)
 end
 
 -- A row's or position row's key that no declaration has counts once too.
@@ -993,6 +1044,8 @@ end
 -- Everything that depends on the width, which the game only knows once the
 -- window is on screen.
 function mt:layout()
+    -- Counted, so a caller can tell the page was just laid out (Panel.open).
+    self.layouts = (self.layouts or 0) + 1
     self:wrapTabs()
     -- The width we laid out at, so OnSizeChanged can tell a new one.
     self.laidW = self.frame:GetWidth()
@@ -1017,8 +1070,9 @@ function mt:layout()
             -- The subs as tabs in the strip (`subTabs`).
             for _, b in ipairs(page.subTabs or {}) do
                 b:light(b.sub == page.sub)
-                b.mark:SetShown((self.marks and page.subTouched and page.subTouched[b.sub]) and true or false)
+                setMark(self, b, self.marks and page.subTouched and page.subTouched[b.sub])
             end
+            self:rewrap()
             -- The sub-tab selector, in lines as wide as the page.
             local bar = page.subBar
             if bar then
@@ -1049,7 +1103,8 @@ function mt:layout()
                 end
                 row:SetShown(not hidden)
                 if row.wide then
-                    -- A choice of segments shares a line when it fits a
+                    -- A row with a wide control (a choice of segments, a
+                    -- slider, a position) shares a line when it fits a
                     -- column beside its name.
                     row.full = cols == 1 or (Z.INSET + Z.MIN_LABEL + 8 + row.revW + 6
                                              + row.ctrlW + Z.INSET > colW)
@@ -1111,7 +1166,7 @@ function mt:layout()
             end
 
             page.frame:SetSize(paneW, max(y, 10))
-            self.content:SetHeight(max(y, 10))
+            self.scroll:setContentHeight(max(y, 10))
         end
     end
     if self.scroll.update then self.scroll:update() end
@@ -1136,10 +1191,13 @@ function mt:refresh()
         row.unmet = (not met) and (why or "Needs another setting on.") or nil
         local enabled = enabled and met
         if shown(key) and row.own then
-            -- No changed mark: the chip says whether it has its own value.
+            -- The chip takes the revert button's place: a click on "Own"
+            -- makes it follow again. The changed mark says it has a value of
+            -- its own, like any changed row's.
             local following = a.inherits(key)
             row.apply(row, a.get(key), enabled)
-            row.label:SetText(row.labelText)
+            row.label:SetText(row.labelText
+                              .. ((following or not self.marks) and "" or " " .. T.MARK))
             row.label:SetTextColor(1, 1, 1, enabled and T.A_TEXT or T.A_FAINT)
             row.own.label:SetText(following and "All" or "Own")
             row.own:show(not following, enabled)
@@ -1158,11 +1216,13 @@ function mt:refresh()
         end
     end
 
-    -- The position rows and the folds, which hold no setting of their own.
+    -- The position rows, the links to windows and the folds, which hold no
+    -- setting of their own.
     for _, page in ipairs(self.pages) do
         for _, pr in ipairs(page.posRows or {}) do
             pr:fill(enabled and (needsMet(a, pr.needs)))
         end
+        for _, link in ipairs(page.links or {}) do link:fill() end
         for _, fold in ipairs(page.folds or {}) do
             fold.changed = false
             for _, row in ipairs(page.rows) do
@@ -1192,13 +1252,26 @@ function mt:refresh()
                 touched = true
             end
         end
+        -- A position row holds two settings and no `optKey`.
+        for _, pr in ipairs(page.posRows or {}) do
+            if (shown(pr.xKey) and not a.isDefault(pr.xKey))
+               or (shown(pr.yKey) and not a.isDefault(pr.yKey)) then
+                touched = true
+                if pr.sub and page.subTouched then page.subTouched[pr.sub] = true end
+            end
+        end
+        -- A link to a window that holds changed settings or edits.
+        for _, link in ipairs(page.links or {}) do
+            if link.changed then touched = true end
+        end
         -- An extra page's own changes, like the supplies on Supplies' list.
         if page.edits then
             local ok, more = pcall(page.edits)
             if ok and more then touched = true end
         end
-        page.tab.mark:SetShown(touched and self.marks)
+        setMark(self, page.tab, touched and self.marks)
     end
+    self:rewrap()
 
     -- Said in words as well as greyed out, because a page of grey controls
     -- with no sentence looks broken.
@@ -1247,6 +1320,14 @@ function mt:jump(key)
         -- An X or Y shows its position row rather than the number under
         -- Advanced.
         if page.posOf and page.posOf[key] then found = page.posOf[key] end
+        -- A setting a window draws shows the link to that window.
+        if not found then
+            for _, link in ipairs(page.links or {}) do
+                for _, k in ipairs(link.keys) do
+                    if k == key then found = link end
+                end
+            end
+        end
         if found then
             if found.sub then self:setSub(page, found.sub) end
             if found.adv then
@@ -1262,6 +1343,85 @@ function mt:jump(key)
             return found
         end
     end
+end
+
+-- =============================================================
+-- A link to a window
+-- =============================================================
+-- A row for settings that a window of their own draws instead of this page
+-- (`row = false` with `window`, or a key a window's page claims), and for
+-- a module's changes that live there (`adapter.windows[id].edits`), like
+-- Supplies' counts. It has the window's icon, "Set in <window>" and an Open
+-- button, and the changed mark while the module's edits there differ from
+-- the default, so the marks lead from the sidebar to the window. The
+-- window's settings don't mark it (heldByWindow).
+--
+-- `win` is what the page's `windowOf(id, spec)` answered: { title, icon,
+-- open }. `keys` are the settings the window holds, and `edits` counts the
+-- rest.
+local function newLink(parent, panel, win, keys, edits)
+    local row = CreateFrame("Button", nil, parent)
+    row:SetHeight(Z.ROW)
+    row.isLink, row.keys, row.edits, row.win = true, keys, edits, win
+    row.full = false
+    row.bg = T.fill(row, WHITE, 0.03)
+    row.bg:SetAllPoints(row)
+    row.hl = T.fill(row, WHITE, 0.05, "BORDER")
+    row.hl:SetAllPoints(row)
+    row.hl:Hide()
+    local x = Z.INSET
+    if win.icon then
+        row.icon = T.icon(row, win.icon, 16)
+        row.icon:SetPoint("LEFT", row, "LEFT", x, 0)
+        x = x + 16 + 6
+    end
+    row.label = T.text(row, T.SIZE.label, false, T.A_TEXT)
+    row.label:SetPoint("LEFT", row, "LEFT", x, 0)
+    if row.label.SetWordWrap then row.label:SetWordWrap(false) end
+    row.labelText = "Set in " .. (win.title or "its window")
+    row.label:SetText(row.labelText)
+    row.labelX = x
+
+    row.open = T.button(row, "Open", Z.BUTTON, Z.CTRL)
+    row.ctrlW, row.revW = Z.BUTTON, 0
+    local function go() if win.open then win.open() end end
+    row.open:SetScript("OnClick", go)
+    row:SetScript("OnClick", go)
+
+    local function enter()
+        row.hl:Show()
+        simpleTip(row, win.title or "", row.changed and "Something there is changed." or nil,
+                  { { "Click", "open" } })
+    end
+    local function leave() row.hl:Hide() hideTooltip() end
+    row:SetScript("OnEnter", enter)
+    row:SetScript("OnLeave", leave)
+    row.open:HookScript("OnEnter", enter)
+    row.open:HookScript("OnLeave", leave)
+
+    -- How many of its edits differ from the default. Its settings don't
+    -- count (heldByWindow).
+    function row:count()
+        local n = 0
+        if self.edits then
+            local ok, more = pcall(self.edits)
+            if ok and type(more) == "number" then n = n + more end
+        end
+        return n
+    end
+
+    function row:fill()
+        self.changed = panel.marks and self:count() > 0 or false
+        self.label:SetText(self.labelText .. (self.changed and (" " .. T.MARK) or ""))
+    end
+
+    function row:place(w)
+        self:SetWidth(w)
+        self.label:SetWidth(max(40, w - Z.INSET - self.ctrlW - 8 - self.labelX))
+        self.open:ClearAllPoints()
+        self.open:SetPoint("RIGHT", self, "RIGHT", -Z.INSET, 0)
+    end
+    return row
 end
 
 -- A section's note, a dim line or two under its heading. `place(w)` sets
@@ -1307,6 +1467,8 @@ function SP.new(parent, adapter, opts)
         -- The gold mark on a changed setting, and on its tab and sub. A page
         -- for players we ship to can leave it off (`marks = false`).
         marks = opts.marks ~= false,
+        -- The tabs in T.tab's header look, flush (the config window).
+        headTabs = opts.headTabs and true or false,
         tabs = {},
         heads = {},
     }, mt)
@@ -1323,6 +1485,8 @@ function SP.new(parent, adapter, opts)
     rule:SetHeight(1)
     rule:SetPoint("TOPLEFT", self.strip, "BOTTOMLEFT", 0, 0)
     rule:SetPoint("TOPRIGHT", self.strip, "BOTTOMRIGHT", 0, 0)
+    -- A window that hosts one page folds the strip away (Kit.settingsBody).
+    self.rule = rule
 
     -- The combat line, at the right end of the first line of tabs.
     self.warning = T.text(frame, Z.WARN_FONT, true, 1)
@@ -1353,10 +1517,12 @@ function SP.new(parent, adapter, opts)
     -- alphabetical, the order `/bayov <mod> list` prints.
     -- ------------------------------------------------------------------
     -- Claimed keys first, so a claimed key gets no row here and a group with
-    -- nothing left gets no tab.
+    -- nothing left gets no tab. So does a key with `row = false`, which a
+    -- window sets instead: it stays declared and saved, and changed() still
+    -- counts it.
     local seen = {}
     for key, decl in pairs(adapter.decls) do
-        if decl.page or not wanted(groupOf(decl)) then seen[key] = true end
+        if decl.page or decl.row == false or not wanted(groupOf(decl)) then seen[key] = true end
     end
 
     local function shown(key)
@@ -1367,7 +1533,7 @@ function SP.new(parent, adapter, opts)
     -- so a module's own page can come first. One that `groups` doesn't name
     -- comes after them all. An extra with `under = <group>` gets no tab of
     -- its own: it draws under that group's rows, like a Reset button after
-    -- a position.
+    -- a position. When the group has no rows, it is the group's tab.
     local extras, under, over = {}, {}, {}
     for _, ex in ipairs(adapter.extras or {}) do
         if ex.under then under[ex.under] = ex
@@ -1598,6 +1764,16 @@ function SP.new(parent, adapter, opts)
     for key, decl in pairs(adapter.decls) do
         if not seen[key] then rest[groupOf(decl)] = true end
     end
+    -- So does a group whose only content is what the module draws under or
+    -- over its rows. The Gear Sets window's Sets tab is one: each set has its
+    -- own macro switch on its card, so the group has no settings left.
+    local placed = {}
+    for _, p in ipairs(self.pages) do placed[p.name] = true end
+    for _, list in ipairs({ under, over }) do
+        for g in pairs(list) do
+            if wanted(g) and not placed[g] then rest[g] = true end
+        end
+    end
     local restNames = {}
     for g in pairs(rest) do restNames[#restNames + 1] = g end
     table.sort(restNames)
@@ -1610,5 +1786,58 @@ function SP.new(parent, adapter, opts)
         if not (ex.under or ex.over) and wanted(ex.name) then addExtra(ex) end
     end
     for _, ex in ipairs(adapter.extras or {}) do ex.added = nil end
+
+    -- A link per window that holds settings or changes this page doesn't
+    -- draw, so the changed marks lead there (newLink). Only a page that can
+    -- open windows (`opts.windowOf`, the config window's) has them.
+    if opts.windowOf and #self.pages > 0 then
+        local extraNames = {}
+        for _, ex in ipairs(adapter.extras or {}) do
+            if ex.name then extraNames[ex.name] = true end
+        end
+        local byWin, ids = {}, {}
+        local function entry(id)
+            if not byWin[id] then
+                byWin[id] = { keys = {} }
+                ids[#ids + 1] = id
+            end
+            return byWin[id]
+        end
+        local keys = {}
+        for key, decl in pairs(adapter.decls) do
+            if decl.window and wanted(groupOf(decl))
+               and (decl.row == false or (decl.page and not extraNames[decl.page])) then
+                keys[#keys + 1] = key
+            end
+        end
+        sortKeys(keys, adapter.decls)
+        for _, key in ipairs(keys) do
+            local decl = adapter.decls[key]
+            local e = entry(decl.window)
+            e.keys[#e.keys + 1] = key
+            e.group = e.group or groupOf(decl)
+        end
+        for id, spec in pairs(adapter.windows or {}) do entry(id).spec = spec end
+        table.sort(ids)
+        local byName = {}
+        for _, page in ipairs(self.pages) do byName[page.name] = page end
+        -- A generated page rather than a module's own, which lays itself out.
+        local firstGenerated
+        for _, page in ipairs(self.pages) do
+            if page.posOf then firstGenerated = page break end
+        end
+        for _, id in ipairs(ids) do
+            local e = byWin[id]
+            local win = opts.windowOf(id, e.spec)
+            if win then
+                local page = (e.spec and e.spec.group and byName[e.spec.group])
+                             or byName[e.group] or firstGenerated or self.pages[1]
+                local link = newLink(page.frame, self, win, e.keys, e.spec and e.spec.edits)
+                page.links = page.links or {}
+                page.links[#page.links + 1] = link
+                table.insert(page.rows, #page.links, link)
+            end
+        end
+    end
     return self
 end

@@ -273,9 +273,8 @@ local function placeCell(r, w, top, main, singles, a, class, counts)
         c.id = sgl.id
         -- How many get it, over the icon's corner, when it's more than one.
         if not c.num then
-            c.num = T.text(c, T.SIZE.caption, true, 1)
+            c.num = T.outline(T.text(c, T.SIZE.caption, true, 1))
             c.num:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", 3, -2)
-            c.num:SetShadowOffset(1, -1)
         end
         c.num:SetText(#sgl.names > 1 and tostring(#sgl.names) or "")
         c:ClearAllPoints()

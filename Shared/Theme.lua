@@ -5,7 +5,7 @@
 -- alphas rather than in different colours, one accent colour for whatever is
 -- selected or on, and 1 pixel borders. EUI paints most of its window from one
 -- big image. We draw ours from solid textures, so it needs no art and looks
--- the same on anniversary, where EUI isn't installed.
+-- the same where EUI isn't installed.
 --
 -- The accent is the blue the /bayov console prints module names in, so the
 -- window and the chat lines read as the same thing. It means selected, on, or
@@ -82,6 +82,11 @@ T.A_SUB   = 0.70
 T.A_DIM   = 0.55
 T.A_FAINT = 0.38
 T.A_OFF   = 0.22
+
+-- A list's row under the mouse is white at T.LIST_HOVER, and the picked row
+-- the accent at T.LIST_SELECTED, in every list and table.
+T.LIST_HOVER    = 0.05
+T.LIST_SELECTED = 0.18
 
 -- A colour lifted toward white until it reads on our dark panels.
 --
@@ -221,7 +226,11 @@ function T.wheelLimit(edit, up)
     C_Timer.After(T.LIMIT_FLASH, function()
         if edit.limitN ~= n then return end
         if arrow then arrow:SetVertexColor(1, 1, 1, 0.35) end
-        if edit:HasFocus() then T.paint(edit, T.ACCENT, 0.9) else T.paint(edit, { 1, 1, 1 }, 0.12) end
+        if edit:HasFocus() then
+            T.paint(edit, T.ACCENT, 0.9)
+        else
+            T.paint(edit, edit.restEdge or { 1, 1, 1 }, edit.restAlpha or 0.12)
+        end
         if edit.quietLook then edit.quietLook() end
     end)
 end
@@ -321,6 +330,102 @@ function T.text(parent, size, bold, alpha, layer)
     fs:SetJustifyH("LEFT")
     texts[fs] = { bold = bold and true or false, size = size or 14 }
     return fs
+end
+
+-- What goes between the fragments of a status or a line: "22 categories ·
+-- 3 hidden".
+T.SEP = " \194\183 "
+
+-- The fragments joined by T.SEP, the empty ones (nil, false, "") left out:
+-- T.join("22 categories", hidden > 0 and hidden .. " hidden"). One table of
+-- fragments works too.
+function T.join(...)
+    local n = select("#", ...)
+    local parts = { ... }
+    if n == 1 and type(parts[1]) == "table" then
+        parts = parts[1]
+        n = #parts
+    end
+    local out = {}
+    for i = 1, n do
+        local p = parts[i]
+        if p ~= nil and p ~= false and p ~= "" then out[#out + 1] = tostring(p) end
+    end
+    return table.concat(out, T.SEP)
+end
+
+-- The one look of a list or page with nothing in it: what's missing as a
+-- sentence (14, dim) in the middle of `parent`, and a hint under it (12,
+-- faint) that says how to get some.
+--
+--   opts.hint   the hint
+--   opts.area   what it sits over, `parent` when not given
+--   opts.cover  true: a solid back that hides what's under it and takes the
+--               mouse, above the parent's rows (the Ledger's views)
+--   opts.pad    room at its sides before the text wraps (10)
+--
+-- It answers the frame, shown when `text` is given. e:set(text, hint) changes
+-- it, and e:set(nil) hides it. e.text and e.hint are its two lines.
+function T.empty(parent, text, opts)
+    opts = opts or {}
+    local area = opts.area or parent
+    local pad = opts.pad or 10
+    local e = CreateFrame("Frame", nil, parent)
+    e:SetAllPoints(area)
+    if opts.cover then
+        e:SetFrameLevel((parent:GetFrameLevel() or 1) + 50)
+        e.bg = T.fill(e, T.BG, 0.97)
+        e.bg:SetAllPoints(e)
+        e:EnableMouse(true)
+    end
+    e.text = T.text(e, 14, false, T.A_DIM)
+    e.text:SetJustifyH("CENTER")
+    e.hint = T.text(e, 12, false, T.A_FAINT)
+    e.hint:SetJustifyH("CENTER")
+    e.hint:SetPoint("TOPLEFT", e.text, "BOTTOMLEFT", 0, -6)
+    e.hint:SetPoint("TOPRIGHT", e.text, "BOTTOMRIGHT", 0, -6)
+    function e:set(t, hint)
+        if not t then
+            self:Hide()
+            return
+        end
+        self.text:SetText(t)
+        self.hint:SetText(hint or "")
+        -- With a hint the two lines sit round the middle, without one the
+        -- sentence is in it.
+        self.text:ClearAllPoints()
+        local y = (hint and hint ~= "") and 14 or 0
+        local point = y > 0 and "BOTTOM" or ""
+        self.text:SetPoint(point .. "LEFT", self, "LEFT", pad, y)
+        self.text:SetPoint(point .. "RIGHT", self, "RIGHT", -pad, y)
+        self:Show()
+    end
+    if text then e:set(text, opts.hint) else e:Hide() end
+    return e
+end
+
+-- Gives a text a black outline, like the HUD's cooldown numbers.
+--
+-- A count on an item icon needs it, because a soft shadow vanishes on a
+-- bright or busy icon. The outline stays when the window font changes, since
+-- T.restyle keeps a text's flags.
+function T.outline(fs)
+    local path, size = fs:GetFont()
+    fs:SetFont(path or T.BOLD, size or 11, "OUTLINE")
+    fs:SetShadowOffset(0, 0)
+    return fs
+end
+
+-- The font size of a count on an icon `icon` pixels high, when nothing else
+-- sits on that icon.
+--
+-- A big icon has room for a bigger number, so a 34 px mail attachment gets a
+-- 14 px count. An icon under 30 px keeps the usual 11. An icon that also shows
+-- a cooldown or other text in its middle, like the HUD's, keeps a small count
+-- whatever its size, so the two don't crowd each other.
+function T.countSize(icon)
+    if (icon or 0) < 30 then return 11 end
+    return math.floor(icon * 0.4 + 0.5)
 end
 
 -- Puts a one-line text at `size`, or one step smaller (`small`) when its
@@ -643,6 +748,13 @@ function T.windowEdge(f)
     T.border(f, { 1, 1, 1 }, 0.08)
 end
 
+-- The small shadow under a popup, menu or dropdown list (T.popupShadow).
+-- It's BayovCore's, drawn from its media, so a popup in Buff Coordinator
+-- alone has none.
+local function popupShadow(f)
+    if T.popupShadow then T.popupShadow(f) end
+end
+
 -- A small panel that opens from a button, like a legend, in the look of our
 -- menus: a flat dark fill and a faint border. The textured panel is for
 -- windows only.
@@ -650,11 +762,44 @@ function T.popup(f)
     f.bg = T.fill(f, { 0.07, 0.08, 0.10 }, 0.98, "BACKGROUND")
     f.bg:SetAllPoints(f)
     T.border(f, { 1, 1, 1 }, 0.18)
+    popupShadow(f)
 end
 
 -- How much of each side of an icon we crop. The game's icons have a bevelled
 -- bezel round the edge, and this is enough to lose all of it.
 T.ICON_ZOOM = 0.1
+
+-- Puts `art` on a plain texture `tex`. `art` is a path or a file ID, drawn
+-- whole, or a piece of a bigger file: { file = <path or file ID>, coords =
+-- { left, right, top, bottom }, grey = <true to desaturate> }, like the game's
+-- quest marks in BayovCore's T.QUEST.
+--
+-- We draw a piece from its file and corners, never with SetAtlas. On Forever a
+-- SetTexCoord after SetAtlas counts inside the atlas, so a pooled texture
+-- that took an atlas once would crop the next icon it shows.
+--
+-- `setTexture` is the texture's own SetTexture, for T.icon, which wraps it.
+function T.setArt(tex, art, setTexture)
+    setTexture = setTexture or tex.SetTexture
+    if type(art) == "table" then
+        setTexture(tex, art.file)
+        local c = art.coords
+        tex:SetTexCoord(c[1], c[2], c[3], c[4])
+        if tex.SetDesaturated and (art.grey or tex.artGrey) then
+            tex:SetDesaturated(art.grey and true or false)
+            tex.artGrey = art.grey and true or nil
+        end
+        return
+    end
+    setTexture(tex, art)
+    tex:SetTexCoord(0, 1, 0, 1)
+    -- A grey piece left its texture grey. Anything else keeps the grey its
+    -- owner gave it.
+    if tex.artGrey then
+        tex:SetDesaturated(false)
+        tex.artGrey = nil
+    end
+end
 
 -- A spell or item icon, zoomed in past the game's bezel, with a 1 pixel black
 -- edge round it. `plain` leaves the edge off, for an icon that sits in a frame
@@ -672,6 +817,12 @@ function T.icon(parent, path, size, plain)
     local t = parent:CreateTexture(nil, "ARTWORK")
     t:SetSize(size, size)
     local e = {}
+    -- `edged` says the icon has a texture that gets an edge, and `off` that
+    -- SetEdge took the edge away (0 px).
+    local edged, off = false, false
+    local function showEdges(on)
+        for _, x in ipairs(e) do x:SetShown(on) end
+    end
     if not plain then
         -- The edges can't snap to the pixel grid (T.border says why), so the
         -- icon doesn't either. Otherwise an icon at a fractional position, like
@@ -697,8 +848,9 @@ function T.icon(parent, path, size, plain)
         e[3]:SetPoint("BOTTOMLEFT", t, "BOTTOMLEFT", 0, 0)
         e[4]:SetPoint("TOPRIGHT", t, "TOPRIGHT", 0, 0)
         e[4]:SetPoint("BOTTOMRIGHT", t, "BOTTOMRIGHT", 0, 0)
+        local width = 1
         local function fit()
-            local px = T.pixel(parent)
+            local px = T.pixel(parent) * width
             e[1]:SetHeight(px)
             e[2]:SetHeight(px)
             e[3]:SetWidth(px)
@@ -706,11 +858,20 @@ function T.icon(parent, path, size, plain)
         end
         fit()
         if parent.HookScript then parent:HookScript("OnShow", fit) end
-    end
-
-    local edged = false
-    local function showEdges(on)
-        for _, x in ipairs(e) do x:SetShown(on) end
+        -- t:SetEdge(color, px) colours the edge and makes it `px` pixels
+        -- wide, to mark an icon that matters (the Bestiary's stuns in red).
+        -- t:SetEdge() puts back the black 1 pixel edge, and t:SetEdge(nil, 0)
+        -- hides it. The game draws a texture 0 pixels high at its full
+        -- size, so 0 hides the edges rather than sizing them.
+        function t:SetEdge(color, px)
+            local r, g, b = 0, 0, 0
+            if color then r, g, b = color[1], color[2], color[3] end
+            for _, x in ipairs(e) do x:SetColorTexture(r, g, b, 1) end
+            off = px ~= nil and px <= 0
+            width = off and 1 or (px or 1)
+            fit()
+            showEdges(edged and not off and (not t.IsShown or t:IsShown()) and true or false)
+        end
     end
     local function wrap(name, after)
         local orig = t[name]
@@ -720,17 +881,33 @@ function T.icon(parent, path, size, plain)
             after(...)
         end
     end
-    wrap("Show", function() showEdges(edged) end)
+    wrap("Show", function() showEdges(edged and not off) end)
     wrap("Hide", function() showEdges(false) end)
-    wrap("SetShown", function(on) showEdges(edged and on and true or false) end)
+    wrap("SetShown", function(on) showEdges(edged and not off and on and true or false) end)
     wrap("SetAlpha", function(a) for _, x in ipairs(e) do x:SetAlpha(a) end end)
-    wrap("SetTexture", function(p)
-        local z = T.ICON_ZOOM
-        if p == T.LOGO then t:SetTexCoord(0, 1, 0, 1)
-        else t:SetTexCoord(z, 1 - z, z, 1 - z) end
-        edged = p ~= nil and p ~= T.LOGO
-        showEdges(edged and (not t.IsShown or t:IsShown()) and true or false)
-    end)
+    -- It also takes a piece of a bigger file (T.setArt), like the game's
+    -- quest marks. Those have their own outline, so they show whole, with no
+    -- crop and no edge.
+    local setTexture = t.SetTexture
+    if setTexture then
+        function t.SetTexture(self, p, ...)
+            local piece = type(p) == "table"
+            if piece then T.setArt(self, p, setTexture) else setTexture(self, p, ...) end
+            if not piece then
+                local z = T.ICON_ZOOM
+                -- t.whole is set on a glyph of our own that has no bezel to crop.
+                if p == T.LOGO or t.whole then t:SetTexCoord(0, 1, 0, 1)
+                else t:SetTexCoord(z, 1 - z, z, 1 - z) end
+                if self.artGrey then
+                    self:SetDesaturated(false)
+                    self.artGrey = nil
+                end
+            end
+            -- A glyph of our own (t.whole) has no edge either.
+            edged = p ~= nil and p ~= T.LOGO and not t.whole and not piece
+            showEdges(edged and not off and (not t.IsShown or t:IsShown()) and true or false)
+        end
+    end
 
     t:SetTexture(path or [[Interface\Icons\INV_Misc_QuestionMark]])
     return t
@@ -771,6 +948,38 @@ end
 -- drawn as it is too.
 T.CIRCLE = [[Interface\CHARACTERFRAME\TempPortraitAlphaMask]]
 T.DOT = MEDIA .. "Dot"
+
+-- The changed mark (T.MARK's gold dot) as a texture of its own, for a tab.
+-- T.MARK inside a font string sat above the words' middle, so a tab anchors
+-- this one to its words' middle instead. Hidden on arrival.
+T.MARK_DOT = 7
+function T.markDot(parent)
+    local m = parent:CreateTexture(nil, "OVERLAY")
+    m:SetTexture(T.DOT)
+    m:SetSize(T.MARK_DOT, T.MARK_DOT)
+    m:SetVertexColor(1, 209 / 255, 0)
+    m:Hide()
+    return m
+end
+
+-- The changed mark on a tab whose words sit in its middle (T.tab, a settings
+-- page's strip). `pad` is how much wider than its words the tab is.
+--
+-- With the mark the tab grows by 12, and the words move 6 left, so the words
+-- and the mark sit in the middle together and the line under the tab reaches
+-- past both.
+local TAB_MARK_GAP, TAB_MARK_W = 4, 12
+function T.tabMark(b, pad)
+    b.mark = T.markDot(b)
+    b.mark:SetPoint("LEFT", b.label, "RIGHT", TAB_MARK_GAP, 0)
+    function b:setChanged(on)
+        on = on and true or false
+        self.mark:SetShown(on)
+        self.label:ClearAllPoints()
+        self.label:SetPoint("CENTER", self, "CENTER", on and -TAB_MARK_W / 2 or 0, 1)
+        self:SetWidth(floor((self.label:GetStringWidth() or 40) + pad + (on and TAB_MARK_W or 0)))
+    end
+end
 
 function T.roundIcon(parent, size)
     local t = parent:CreateTexture(nil, "ARTWORK", nil, 1)
@@ -854,6 +1063,115 @@ function T.roundIcon(parent, size)
     return t
 end
 
+-- A circle icon: a spell or item icon cut round, with a 1 pixel black edge
+-- and, when given a colour, a ring of that colour just inside the edge.
+--
+-- It's the one round look for what stands for a loadout or a gear set: the
+-- gear set HUD by the player frame, the loadouts' badges, the side lists of
+-- the Loadouts and Gear Sets windows, the loadout picker and the menus. A
+-- loadout shows its colour as the ring. A set has the plain black edge.
+--
+-- It answers the outer disc, a texture like T.icon's: anchor it, size it and
+-- show or hide it as one. t:SetTexture(path) sets the picture,
+-- t:SetDesaturated(on) and t:SetDim(on) grey it out, t:SetLit(on) lightens
+-- it under the mouse, and t:SetEdge(color, px)
+-- sets the ring (nil for none). t:SetEdge(color, px, true) colours the outer
+-- edge itself instead, `px` wide, like a queued swap's amber.
+--
+-- The discs and the picture each have their own round mask (the game's
+-- portrait mask), inset by whole screen pixels, so the rings stay sharp.
+function T.circleIcon(parent, path, size)
+    local function disc(sub)
+        local d = parent:CreateTexture(nil, "ARTWORK", nil, sub)
+        if d.SetSnapToPixelGrid then
+            d:SetSnapToPixelGrid(false)
+            d:SetTexelSnappingBias(0)
+        end
+        local m = parent.CreateMaskTexture and d.AddMaskTexture and parent:CreateMaskTexture()
+        if m then
+            m:SetTexture(T.CIRCLE, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+            m:SetAllPoints(d)
+            d:AddMaskTexture(m)
+        end
+        return d
+    end
+    local t = disc(-3)
+    t:SetColorTexture(0, 0, 0, 1)
+    t:SetSize(size or 16, size or 16)
+    local ring = disc(-2)
+    local back = disc(-1)
+    back:SetColorTexture(0.06, 0.07, 0.08, 1)
+    local img = disc(0)
+    local lit = disc(1)
+    lit:SetColorTexture(1, 1, 1, 0.12)
+    lit:Hide()
+    local z = T.ICON_ZOOM
+    t.ring, t.back, t.img = ring, back, img
+
+    local edgePx, ringPx, ringOn = 1, 0, false
+    local function fit()
+        local px = T.pixel(parent)
+        local e, r = edgePx * px, (ringOn and ringPx or 0) * px
+        ring:ClearAllPoints()
+        ring:SetPoint("TOPLEFT", t, "TOPLEFT", e, -e)
+        ring:SetPoint("BOTTOMRIGHT", t, "BOTTOMRIGHT", -e, e)
+        for _, x in ipairs({ back, img, lit }) do
+            x:ClearAllPoints()
+            x:SetPoint("TOPLEFT", t, "TOPLEFT", e + r, -(e + r))
+            x:SetPoint("BOTTOMRIGHT", t, "BOTTOMRIGHT", -(e + r), e + r)
+        end
+    end
+    fit()
+    if parent.HookScript then parent:HookScript("OnShow", fit) end
+    t.Refit = fit
+
+    local colorTex = t.SetColorTexture
+    function t.SetEdge(self, color, px, outer)
+        if outer then
+            colorTex(self, color and color[1] or 0, color and color[2] or 0, color and color[3] or 0, 1)
+            edgePx, ringOn = px or 1, false
+        else
+            colorTex(self, 0, 0, 0, 1)
+            edgePx, ringOn, ringPx = 1, color ~= nil, px or 1
+            if color then ring:SetColorTexture(color[1], color[2], color[3], 1) end
+        end
+        ring:SetShown(ringOn and (not self.IsShown or self:IsShown()) and true or false)
+        fit()
+    end
+    function t.SetTexture(_, p)
+        img:SetTexture(p or [[Interface\Icons\INV_Misc_QuestionMark]])
+        img:SetTexCoord(z, 1 - z, z, 1 - z)
+    end
+    function t.SetDesaturated(_, on) img:SetDesaturated(on and true or false) end
+    -- A soft white over the picture, for a button under the mouse.
+    function t.SetLit(_, on) lit:SetShown(on and true or false) end
+    -- The empty look: grey and darker, for a slot of the HUD with no set worn.
+    function t.SetDim(_, on)
+        img:SetDesaturated(on and true or false)
+        local v = on and 0.55 or 1
+        img:SetVertexColor(v, v, v, 1)
+    end
+    local function wrap(name, after)
+        local orig = t[name]
+        if not orig then return end
+        t[name] = function(self, ...)
+            orig(self, ...)
+            after(...)
+        end
+    end
+    wrap("Show", function() img:Show() back:Show() ring:SetShown(ringOn) end)
+    wrap("Hide", function() img:Hide() back:Hide() ring:Hide() lit:Hide() end)
+    wrap("SetShown", function(on)
+        img:SetShown(on and true or false)
+        back:SetShown(on and true or false)
+        ring:SetShown(on and ringOn or false)
+    end)
+    wrap("SetAlpha", function(a) img:SetAlpha(a) back:SetAlpha(a) ring:SetAlpha(a) end)
+    ring:Hide()
+    t:SetTexture(path)
+    return t
+end
+
 -- =============================================================
 -- Sounds
 -- =============================================================
@@ -869,6 +1187,10 @@ T.SOUNDS = {
     -- A button of the game's templates. Ours are plain frames and make no
     -- sound of their own.
     click = { "IG_MAINMENU_OPTION", 852 },
+    -- A talent point put in or taken out, as the game's talent window plays
+    -- them. A client without them clicks instead.
+    talentAdd = { "UI_CLASS_TALENT_NODE_SPEND", 852 },
+    talentRemove = { "UI_CLASS_TALENT_NODE_REFUND", 852 },
 }
 
 local hushed = false
@@ -973,7 +1295,7 @@ end
 
 -- Showing and hiding a widget on the game screen, like a card, a row of
 -- icons or Buff Coordinator's HUD. It fades in and out over T.FADE_S, the same
--- quarter second our auras take (build/wa/style.py, "transitions"). Windows
+-- quarter second the Combat HUD takes. Windows
 -- the player opens don't use it.
 --
 -- T.appear(f) shows `f` and fades it in. It leaves a frame that is already
@@ -1239,6 +1561,31 @@ function T.trackPress(f)
     f:HookScript("OnMouseUp", function(self) self.pressX, self.pressY = nil, nil end)
 end
 
+-- While we drag in scroll frame `sf`, scrolls it slowly when the mouse is
+-- near its top or bottom edge, so we can reach the rows out of view. The
+-- closer to the edge (or past it), the faster. Call it from the drag's
+-- OnUpdate, before way:update.
+local EDGE, EDGE_SPEED = 28, 360   -- the edge's depth, and the most pixels a second
+
+function T.edgeScroll(sf, elapsed)
+    local range = sf.GetVerticalScrollRange and sf:GetVerticalScrollRange() or 0
+    if range <= 0 then return end
+    local top, bottom = sf:GetTop(), sf:GetBottom()
+    if not (top and bottom) then return end
+    local _, y = cursorIn(sf)
+    local push = 0
+    if y > top - EDGE then
+        push = -math.min(1, (y - (top - EDGE)) / EDGE)
+    elseif y < bottom + EDGE then
+        push = math.min(1, ((bottom + EDGE) - y) / EDGE)
+    end
+    if push == 0 then return end
+    local now = sf:GetVerticalScroll() or 0
+    local v = math.min(range, math.max(0, now + push * EDGE_SPEED * (elapsed or 0)))
+    if v == now then return end
+    if sf.setScroll then sf:setScroll(v) else sf:SetVerticalScroll(v) end
+end
+
 -- A list we drag in. `opts`:
 --   frames   the list's frames in order
 --   from     the place of the one we drag, or nil when it comes from
@@ -1257,6 +1604,11 @@ end
 --            middle, not the mouse, says where it lands.
 --   inside   a function that says whether the mouse is over the list.
 --            When it isn't, nothing makes way and :stop() says nil.
+--   scroll   the scroll frame the list is in, for a list down the page.
+--            The rows move on screen when it scrolls during the drag (by
+--            the wheel, or T.edgeScroll), so we go by where they are in
+--            the list, not where they were on screen when the drag began.
+--            That keeps the dragged frame under the mouse.
 --
 -- way:update(elapsed) works out the place and moves the frames a step, from
 -- an OnUpdate. way:stop() puts every frame back and says the place, from 1
@@ -1288,10 +1640,20 @@ function T.makeWay(opts)
     local q = from and rects[from]
     local lifted = dragged and opts.lift and q
 
+    -- How far the list scrolled down since the drag began. The rows went up
+    -- on screen by that much, so the mouse is that much lower in the list.
+    local sf = opts.scroll
+    local s0 = sf and sf:GetVerticalScroll() or 0
+    local function mouse(f)
+        local cx, cy = cursorIn(f)
+        if sf then cy = cy - ((sf:GetVerticalScroll() or 0) - s0) end
+        return cx, cy
+    end
+
     -- How far the lifted frame is from where it rests: as far as the mouse
     -- moved, kept within the list unless `free`.
     local function lift(free)
-        local cx, cy = cursorIn(dragged)
+        local cx, cy = mouse(dragged)
         if free then return cx - x0, cy - y0 end
         local lo, hi, bottom, top = q.l, q.l, q.t, q.t
         for _, o in pairs(rects) do
@@ -1310,7 +1672,7 @@ function T.makeWay(opts)
         if opts.inside and not opts.inside() then return nil end
         local probe = dragged or frames[1]
         if not probe then return 1 end
-        local cx, cy = cursorIn(probe)
+        local cx, cy = mouse(probe)
         if lifted then
             local dx, dy = lift(true)
             if not opts.grid and axis == "y" then dx = 0 end
@@ -1413,10 +1775,24 @@ end
 -- with what we carry, and goes back to the pointer when the button is up
 -- and the mouse is off it.
 --
+-- While the mouse is over the frame we ask `ok` again each frame. A Gear
+-- Sets row drags only from its icon and name side, so the arrow has to go
+-- when the mouse moves on to its Wear button side.
+--
 -- SetCursor takes the cursor by name. We try it, since a client that
 -- doesn't know the name errors.
 local MOVE_CURSOR = "UI_MOVE_CURSOR"
-local cursorOwner, cursorWatch
+local cursorOwner, cursorOk, cursorOn, cursorWatch
+
+local function showArrow(on)
+    if on == cursorOn then return end
+    if on then
+        cursorOn = SetCursor ~= nil and pcall(SetCursor, MOVE_CURSOR) and true or false
+    else
+        cursorOn = false
+        if ResetCursor then ResetCursor() end
+    end
+end
 
 local function watchCursor()
     if cursorWatch then return cursorWatch end
@@ -1425,23 +1801,29 @@ local function watchCursor()
     cursorWatch:SetScript("OnUpdate", function(self)
         local f = cursorOwner
         local down = IsMouseButtonDown and IsMouseButtonDown("LeftButton")
-        if down or (f and f:IsVisible() and f:IsMouseOver()) then return end
-        cursorOwner = nil
-        if ResetCursor then ResetCursor() end
+        -- During a press or a drag the arrow stays as it is.
+        if down then return end
+        if f and f:IsVisible() and f:IsMouseOver() then
+            showArrow(not cursorOk or cursorOk(f) and true or false)
+            return
+        end
+        showArrow(false)
+        cursorOwner, cursorOk = nil, nil
         self:Hide()
     end)
     return cursorWatch
 end
 
 -- Gives frame `f` the move arrow. `ok`, when given, says whether it can be
--- dragged now.
+-- dragged now, from where the mouse is.
 function T.dragCursor(f, ok)
     f:HookScript("OnEnter", function(self)
-        if ok and not ok(self) then return end
-        if SetCursor and pcall(SetCursor, MOVE_CURSOR) then
-            cursorOwner = self
-            watchCursor():Show()
+        if cursorOwner ~= self then
+            showArrow(false)
         end
+        cursorOwner, cursorOk = self, ok
+        showArrow(not ok or ok(self) and true or false)
+        watchCursor():Show()
     end)
 end
 
@@ -1477,11 +1859,36 @@ end
 -- unless it was given a width. `b:setAccent(on)` makes it the main action or
 -- a plain one, and `b:setTint(color)` paints the main action in another
 -- colour than the accent (nil for the accent again).
+--
+-- `h = "compact"` is the small one for a header or a bar, in place of the
+-- local boxed buttons windows drew: 22 high, 12 bold, sized to its words
+-- unless given a width. `b.compact` says it is one.
+T.CONTROL.buttonCompact = { h = 22, size = 12 }
+
+-- How tall a control is on a window's header row. The header is
+-- WindowKit's HEAD_H (28). A 20 high button already looked like it sat on
+-- the header's bottom line, so at 18 it keeps 5 px above and below, on the
+-- same middle as the title, the cog and the close. The kit marks its header band (and a standard footer) with `rowBand`, and a compact
+-- button, a search box, a dropdown or segments made straight on it take this
+-- height when the caller gives none.
+T.CONTROL.head = 18
+
+-- The height for a control made on `parent`: the header row's when parent is
+-- a header band or a standard footer (WindowKit marks both), or `h` anywhere
+-- else.
+function T.controlH(parent, h)
+    if type(parent) == "table" and parent.rowBand then return T.CONTROL.head end
+    return h
+end
+
 function T.button(parent, label, w, h, accent)
     local size = T.CONTROL.button
+    local compact = h == "compact"
+    if compact then size, h = T.CONTROL.buttonCompact, T.controlH(parent, T.CONTROL.buttonCompact.h) end
     local b = CreateFrame("Button", nil, parent)
-    b:SetSize(w or size.w, h or size.h)
+    b:SetSize(w or size.w or 60, h or size.h)
     b.fixed = w ~= nil
+    b.compact = compact
     b.bg = T.fill(b, { 1, 1, 1 }, 1)
     b.bg:SetAllPoints(b)
     T.border(b, { 1, 1, 1 }, 0.16)
@@ -1495,6 +1902,9 @@ function T.button(parent, label, w, h, accent)
         local on = self:IsEnabled()
         local accent = self.accent
         local c = self.tint or T.ACCENT
+        -- An addon that sets T.PLAIN_WHEN_OFF draws a main action that can't
+        -- run as a plain one, so it doesn't look ready to click.
+        if accent and not on and T.PLAIN_WHEN_OFF then accent = false end
         if accent then
             self.bg:SetColorTexture(c[1], c[2], c[3], 0.22)
         else
@@ -1538,9 +1948,528 @@ function T.button(parent, label, w, h, accent)
     return b
 end
 
+-- A CSS cubic-bezier(x1, y1, x2, y2) as a function of progress 0 to 1, so
+-- motion eases the way the mockups did. T.EASE_SLIDE is the tabs' and sidebars' slide and
+-- fade, T.EASE_IN_OUT the loading bar's pass.
+function T.cubicBezier(x1, y1, x2, y2)
+    local function at(t, a, b)
+        local u = 1 - t
+        return 3 * u * u * t * a + 3 * u * t * t * b + t * t * t
+    end
+    return function(p)
+        if p <= 0 then return 0 elseif p >= 1 then return 1 end
+        local lo, hi = 0, 1
+        for _ = 1, 18 do
+            local mid = (lo + hi) / 2
+            if at(mid, x1, x2) < p then lo = mid else hi = mid end
+        end
+        return at((lo + hi) / 2, y1, y2)
+    end
+end
+T.EASE_OUT = T.cubicBezier(0.2, 0.8, 0.2, 1)
+T.EASE_IN_OUT = T.cubicBezier(0.45, 0, 0.55, 1)
+T.EASE_SLIDE = T.cubicBezier(0.65, 0, 0.35, 1)
+
+-- The motion the header tabs' line and the sidebars' mark share (T.tabLine,
+-- T.sideMark): one mark per row of items (tabs, or a list's rows), made on
+-- the row's frame (`host`), under the picked item. When the pick changes
+-- while the row is on show, it slides from the old item to the new one in
+-- `slide` (0.22) s, easing in and out (T.EASE_SLIDE): the leading edge moves
+-- at once and the trailing edge `lag` (45%) of that later, so it stretches
+-- toward the new item and then shrinks. When the row opens, lays out,
+-- scrolls or resizes, the mark just sits on the picked item: it's anchored
+-- to that item. Its OnUpdate runs only while it moves.
+--
+--   L:to(item, key)  the mark goes to that item, sliding when it can. `key`
+--                    is what's picked (the item when not given): a list that
+--                    reuses its rows as it scrolls passes the record, and the
+--                    mark slides only when that changes.
+--   L:off(item)      that item is no longer picked
+--   L:snap()         puts it on the picked item at once
+--   L.cur            the item it's on; L.x, L.w where it's drawn along the
+--                    row, from L.cur's start
+--
+-- A look says how a mark is drawn:
+--   look.span(item)        where it sits on `item` at rest: start and length
+--   look.offset(from, to)  how far `from` starts past `to` along the row, or
+--                          nil while the game can't say
+--   look.draw(L, item, x, w), look.show(L, on)
+--   look.sameFrame         an item that went off counts as where the mark was
+--                          only in the same frame (a pick unlights the old one
+--                          and lights the new one together; a list that
+--                          scrolled its pick away doesn't slide from there)
+T.TAB_LINE = { h = 2, glow = 0.11, glowOut = 7, glowIn = 9, slide = 0.22, lag = 0.45, fade = 0.22,
+               settle = 0.1 }
+-- A header tab's words and icon: dim, under the mouse, picked, turned off.
+local TAB_ALPHA = { off = 0.55, hover = 0.85, on = 1, disabled = 0.30 }
+T.TAB_ALPHA = TAB_ALPHA
+
+local slideStep
+
+local function slideRun(L)
+    L.drive:SetScript("OnUpdate", slideStep)
+end
+
+local function slideMark(host, field, look)
+    local S = T.TAB_LINE
+    local L = { host = host, fades = {}, look = look }
+    host[field] = L
+    L.drive = CreateFrame("Frame", nil, host)
+    L.drive.line = L
+
+    -- A hidden row stops moving, and a pick in the moment it shows again
+    -- (`settle`) doesn't slide: a window that opens on another page has its
+    -- mark there.
+    if host.HookScript then
+        host:HookScript("OnHide", function()
+            if L.anim or next(L.fades) then
+                L.anim = nil
+                for item, f in pairs(L.fades) do item:fadeTo(f.to) end
+                L.fades = {}
+                L.drive:SetScript("OnUpdate", nil)
+                L:snap()
+            end
+        end)
+        host:HookScript("OnShow", function() L.shownAt = GetTime() end)
+        host:HookScript("OnSizeChanged", function() L:snap() end)
+    end
+
+    -- Whether a pick from `from` to `item` slides, and from how far: both on
+    -- show in a row that's been on show a moment, and both where the game
+    -- can say.
+    local function canSlide(from, item)
+        if not from or from == item or not host:IsVisible() or not from:IsShown() then return nil end
+        if L.shownAt and GetTime() - L.shownAt < S.settle then return nil end
+        return look.offset(from, item)
+    end
+
+    function L:to(item, key)
+        if key == nil then key = item end
+        if self.cur == item and self.key == key and self.anim then return end
+        local from = self.cur
+        if not from and (not look.sameFrame or self.lastAt == GetTime()) then from = self.last end
+        local moved = key ~= self.key
+        self.cur, self.last, self.key = item, nil, key
+        local d = moved and canSlide(from, item)
+        if not d then
+            self.anim = nil
+            return self:snap()
+        end
+        -- Where the mark is now, from the new item's start: mid-slide, where
+        -- it was drawn.
+        local x0, w0
+        if self.at == from and self.x then
+            x0, w0 = d + self.x, self.w
+        else
+            local fx, fw = look.span(from)
+            x0, w0 = d + (fx or 0), fw or 0
+        end
+        self.anim = { t = 0, l0 = x0, r0 = x0 + w0 }
+        look.draw(self, item, x0, w0)
+        -- The old tab, already unlit, dims with the slide rather than at once.
+        if not from.on and from.fadeTo and from.alpha == from:alphaNow() then
+            from:fadeTo(TAB_ALPHA.on)
+            self:fade(from, TAB_ALPHA.on, from:alphaNow())
+        end
+        slideRun(self)
+        return true
+    end
+
+    function L:off(item)
+        if self.cur ~= item then return end
+        self.cur, self.last, self.lastAt = nil, item, GetTime()
+        if self.anim then return end
+        -- A list unlights the old row and lights the new one in either
+        -- order, so its mark goes on the next frame, when nothing took it:
+        -- never hidden and shown again in one click.
+        if look.sameFrame then return slideRun(self) end
+        look.show(self, false)
+    end
+
+    function L:snap()
+        self.anim = nil
+        local item = self.cur
+        if not item then return look.show(self, false) end
+        local x, w = look.span(item)
+        if not x then return look.show(self, false) end
+        look.draw(self, item, x, w)
+    end
+
+    -- A tab's words and icon fading to `to`.
+    function L:fade(item, from, to)
+        self.fades[item] = { t = 0, from = from, to = to }
+        slideRun(self)
+    end
+    return L
+end
+
+-- One frame of a mark's slide and the tabs' fades. It stops itself once
+-- nothing moves.
+slideStep = function(drive, elapsed)
+    local L, S = drive.line, T.TAB_LINE
+    local look = L.look
+    local moving = false
+    local a = L.anim
+    if a and L.cur then
+        a.t = a.t + (elapsed or 0)
+        local item = L.cur
+        local x1, w1 = look.span(item)
+        local l1, r1 = x1 or 0, (x1 or 0) + (w1 or 0)
+        local lag = S.slide * S.lag
+        -- Going right (or down), the far edge leads and the near one follows.
+        local right = l1 > a.l0
+        local function edge(from, to, late)
+            local p = (a.t - (late and lag or 0)) / S.slide
+            return from + (to - from) * T.EASE_SLIDE(min(1, max(0, p)))
+        end
+        if a.t >= S.slide + lag then
+            L:snap()
+        else
+            local l = edge(a.l0, l1, right)
+            local r = edge(a.r0, r1, not right)
+            look.draw(L, item, l, r - l)
+            moving = true
+        end
+    elseif a then
+        L.anim = nil
+        look.show(L, false)
+    elseif not L.cur then
+        look.show(L, false)
+    end
+    for item, f in pairs(L.fades) do
+        f.t = f.t + (elapsed or 0)
+        local p = min(1, f.t / S.fade)
+        item:fadeTo(f.from + (f.to - f.from) * T.EASE_SLIDE(p))
+        if p >= 1 then L.fades[item] = nil else moving = true end
+    end
+    if not moving then drive:SetScript("OnUpdate", nil) end
+end
+
+-- The accent line under the picked tab of a row of header tabs (T.tab's
+-- header look, T.tabStrip, the config window's strip). One line per row,
+-- made on the row's frame (`host`) the first time a tab there lights, so the
+-- header tabs and every strip share this one piece.
+--
+-- It's 2 high on the row's bottom edge, the accent, as wide as the picked
+-- tab's words (or icon) plus `lineOut` each side, with a soft accent glow
+-- round it (Media/LineGlow.tga, three slices). It slides as above, and the
+-- two tabs' words fade between dim and bright over `fade` s. A tab's words
+-- that change put it under them at once.
+--
+--   L = T.tabLine(host)  the row's line (made once, host.tabLine)
+local function tabLineDraw(L, tab, x, w)
+    local line = L.line
+    line:ClearAllPoints()
+    line:SetPoint("BOTTOMLEFT", tab, "BOTTOMLEFT", x, 0)
+    line:SetWidth(max(1, w))
+    L.x, L.w, L.at = x, w, tab
+    local c = T.ACCENT
+    line:SetColorTexture(c[1], c[2], c[3], 1)
+    for i, g in ipairs(L.glows) do
+        g:SetVertexColor(c[1], c[2], c[3], T.TAB_LINE.glow)
+        g:SetShown(i ~= 2 or w > 2 * T.TAB_LINE.glowIn)
+    end
+    line:Show()
+end
+
+local function tabLineShow(L, on)
+    L.line:SetShown(on)
+    for _, g in ipairs(L.glows) do g:SetShown(on) end
+end
+
+local TAB_LOOK = {
+    span = function(tab) return tab.barX, tab.barW end,
+    offset = function(from, tab)
+        local fl, tl = from:GetLeft(), tab:GetLeft()
+        if fl and tl then return fl - tl end
+    end,
+    draw = tabLineDraw,
+    show = tabLineShow,
+}
+
+function T.tabLine(host)
+    if host.tabLine then return host.tabLine end
+    local S = T.TAB_LINE
+    local L = slideMark(host, "tabLine", TAB_LOOK)
+    L.line = host:CreateTexture(nil, "OVERLAY")
+    L.line:SetHeight(S.h)
+    L.line:Hide()
+    -- The glow: the left end, the middle stretched along the line, the right end.
+    local tall, cap = S.h + 2 * S.glowOut, S.glowOut + S.glowIn
+    L.glows = {}
+    for i, coords in ipairs({ { 0, 0.5 }, { 0.49, 0.51 }, { 0.5, 1 } }) do
+        local g = host:CreateTexture(nil, "ARTWORK")
+        g:SetTexture(T.media("LineGlow"))
+        g:SetTexCoord(coords[1], coords[2], 0, 1)
+        if g.SetBlendMode then g:SetBlendMode("ADD") end
+        g:SetHeight(tall)
+        g:Hide()
+        L.glows[i] = g
+    end
+    local gl, gm, gr = L.glows[1], L.glows[2], L.glows[3]
+    gl:SetWidth(cap)
+    gr:SetWidth(cap)
+    gl:SetPoint("LEFT", L.line, "LEFT", -S.glowOut, 0)
+    gr:SetPoint("RIGHT", L.line, "RIGHT", S.glowOut, 0)
+    gm:SetPoint("TOPLEFT", gl, "TOPRIGHT", 0, 0)
+    gm:SetPoint("BOTTOMRIGHT", gr, "BOTTOMLEFT", 0, 0)
+    return L
+end
+
+-- The picked row of a sidebar, or of any list down a window's left: the
+-- tabs' line turned on its side. An accent wash over the whole row, fading
+-- from `wash` (.24) at its left to nothing at its right, and a `bar` (3) px
+-- accent bar down its left edge. One mark per list, made on the frame its
+-- rows sit in (`host`, the scroll child in a scrolling list, so the mark
+-- scrolls with its row and is cut off where the rows are), and it slides
+-- from row to row the way the tabs' line does: the edge in the way it goes
+-- first, the other 45% later. It sits on the row it's on through a scroll,
+-- a layout or a resize, and it hides while that row does.
+--
+--   M = T.sideMark(host)              the list's mark (made once, host.sideMark).
+--                                     An unpicked row's mark goes on the next
+--                                     frame, unless another row took it.
+--   T.sidePick(row, on, key, host)    lights or unlights `row` (on its
+--                                     parent's mark when `host` isn't given).
+--                                     `key` is the record a reused row shows.
+--
+-- A card list keeps its own look: this is for rows.
+T.SIDE_MARK = { wash = 0.24, bar = 3 }
+
+local function sideShow(M, on)
+    M.wash:SetShown(on)
+    M.bar:SetShown(on)
+end
+
+local function sideDraw(M, row, y, h)
+    local wash = M.wash
+    wash:ClearAllPoints()
+    wash:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -y)
+    wash:SetPoint("TOPRIGHT", row, "TOPRIGHT", 0, -y)
+    wash:SetHeight(max(1, h))
+    M.x, M.w, M.at = y, h, row
+    local c = T.ACCENT
+    T.fade(wash, c, T.SIDE_MARK.wash, 0)
+    M.bar:SetColorTexture(c[1], c[2], c[3], 1)
+    -- The mark hides with its row (a folded heading, a search, a row the
+    -- list isn't using), and comes back with it.
+    if not row.sideMarkHooked and row.HookScript then
+        row.sideMarkHooked = true
+        row:HookScript("OnHide", function(self)
+            if M.at == self then sideShow(M, false) end
+        end)
+        row:HookScript("OnShow", function(self)
+            if M.cur == self then M:snap() end
+        end)
+    end
+    sideShow(M, row:IsShown() and true or false)
+end
+
+local SIDE_LOOK = {
+    span = function(row) return 0, row:GetHeight() or 0 end,
+    offset = function(from, row)
+        local ft, rt = from:GetTop(), row:GetTop()
+        if ft and rt then return rt - ft end
+    end,
+    draw = sideDraw,
+    show = sideShow,
+    sameFrame = true,
+}
+
+function T.sideMark(host)
+    if host.sideMark then return host.sideMark end
+    local M = slideMark(host, "sideMark", SIDE_LOOK)
+    M.wash = host:CreateTexture(nil, "BACKGROUND")
+    M.bar = host:CreateTexture(nil, "ARTWORK")
+    M.bar:SetWidth(T.SIDE_MARK.bar)
+    M.bar:SetPoint("TOPLEFT", M.wash, "TOPLEFT", 0, 0)
+    M.bar:SetPoint("BOTTOMLEFT", M.wash, "BOTTOMLEFT", 0, 0)
+    sideShow(M, false)
+    return M
+end
+
+function T.sidePick(row, on, key, host)
+    host = host or row:GetParent()
+    if not host then return nil end
+    local M = T.sideMark(host)
+    if on then M:to(row, key) else M:off(row) end
+    return M
+end
+
+-- Puts a row's line under its picked tab again, after the row laid its tabs
+-- out. Nothing when no tab there has lit yet.
+function T.snapTabLine(host)
+    local L = host and host.tabLine
+    if L and not L.anim then L:snap() end
+end
+
+-- A tab in a window's header. Regular text at .55, .85 under the mouse and 1
+-- when chosen, at the window title's size and on its middle. A tab has no
+-- fill of its own, chosen or not, and no gradient. The chosen one shows by
+-- the row's one accent line (T.tabLine): 2 high on the row's bottom edge,
+-- with a soft glow, as wide as its words (or its icon, and the icon and words
+-- together) plus `lineOut` (4) on each side, and it slides when the pick
+-- changes. It is the header's full height and tabs sit flush, `pad` (8) each
+-- side, so the words of two tabs are 16 apart.
+--
+-- `opts.icon` puts a 14 px icon before the words (`opts.plain` leaves the
+-- icon's black edge off, for a white glyph, which shows whole at 16), about
+-- the title icon's size.
+-- With no words it's an icon-only tab, 30 wide (16 between two icons). Badges: `tab:setBadge(true)` is an orange dot for something
+-- to do, `tab:setBadge(n)` a small dim count after the words (a string,
+-- like "3/18", shows as it is), and
+-- `tab:setChanged(on)` the changed mark.
+local HEAD_TAB = { pad = 8, iconGap = 6, icon = 14, iconOnly = 30, lineOut = 4,
+                   count = 11, countGap = 5, markGap = 4 }
+-- A plain icon is a white glyph of our own, like Social's tabs. It has no
+-- bezel, and its round strokes reach close to its edges, so we show it whole
+-- instead of cropped like a game icon (the crop cut the sides off the Chats
+-- bubble and the Recent allies clock). Whole, the art is smaller in its box,
+-- so its box is the title icon's 16 and it looks the same size as that icon.
+HEAD_TAB.glyph = 16
+T.HEAD_TAB = HEAD_TAB
+local function headTab(parent, label, h, opts)
+    local S = HEAD_TAB
+    local b = CreateFrame("Button", nil, parent)
+    b:SetHeight(h or 35)
+    b.head = true
+    if opts.icon then
+        b.icon = T.icon(b, opts.icon, opts.plain and S.glyph or S.icon, opts.plain)
+        if opts.plain then
+            b.icon.whole = true
+            b.icon:SetTexCoord(0, 1, 0, 1)
+        end
+    end
+    b.label = T.text(b, T.SIZE.body, false, TAB_ALPHA.off)
+    b.label:SetWordWrap(false)
+    b.count = T.text(b, S.count, true, T.A_DIM)
+    b.count:Hide()
+    b.mark = T.markDot(b)
+    b.dot = T.fill(b, T.ORANGE, 1, "OVERLAY")
+    b.dot:SetSize(6, 6)
+    b.dot:SetPoint("TOPRIGHT", b, "TOPRIGHT", -8, -10)
+    b.dot:Hide()
+
+    -- Where the row's accent line goes under this tab: under the icon and the
+    -- words, which are `w` wide from `x`, reaching lineOut past them on each
+    -- side. A picked tab whose words changed puts the line there at once.
+    local function underline(self, x, w)
+        x, w = x - S.lineOut, w + 2 * S.lineOut
+        self.barX, self.barW = x, w
+        local L = self.on and parent.tabLine
+        if L and L.cur == self and not L.anim then L:snap() end
+    end
+
+    -- Lays out the icon, the words and the badges from the left, and sizes
+    -- the tab to them.
+    function b:layout()
+        local text = self.label:GetText() or ""
+        local words = text ~= ""
+        self.label:SetShown(words)
+        if self.icon and not words then
+            self.icon:ClearAllPoints()
+            self.icon:SetPoint("CENTER", self, "CENTER", 0, 0)
+            self:SetWidth(S.iconOnly)
+            underline(self, (S.iconOnly - S.icon) / 2, S.icon)
+            return
+        end
+        local x = S.pad
+        if self.icon then
+            self.icon:ClearAllPoints()
+            self.icon:SetPoint("CENTER", self, "LEFT", x + S.icon / 2, 0)
+            x = x + S.icon + S.iconGap
+        end
+        -- On the title's middle: the kit's title sits at the header's
+        -- middle with no lift.
+        self.label:ClearAllPoints()
+        self.label:SetPoint("LEFT", self, "LEFT", x, 0)
+        x = x + floor((self.label:GetStringWidth() or 0) + 0.5)
+        local lineEnd = x
+        if self.count:IsShown() then
+            self.count:ClearAllPoints()
+            self.count:SetPoint("LEFT", self.label, "RIGHT", S.countGap, 0)
+            x = x + S.countGap + floor((self.count:GetStringWidth() or 0) + 0.5)
+        end
+        -- The mark sits on the words' middle, and the line under a picked
+        -- tab reaches past it too.
+        if self.mark:IsShown() then
+            self.mark:ClearAllPoints()
+            self.mark:SetPoint("LEFT", self, "LEFT", x + S.markGap, 0)
+            x = x + S.markGap + T.MARK_DOT
+            lineEnd = x
+        end
+        underline(self, S.pad, lineEnd - S.pad)
+        self:SetWidth(x + S.pad)
+    end
+
+    function b:alphaNow()
+        local enabled = not self.IsEnabled or self:IsEnabled()
+        return not enabled and TAB_ALPHA.disabled or self.on and TAB_ALPHA.on
+               or self.over and TAB_ALPHA.hover or TAB_ALPHA.off
+    end
+    function b:fadeTo(a)
+        self.alpha = a
+        self.label:SetTextColor(1, 1, 1, a)
+        if self.icon then self.icon:SetAlpha(a) end
+    end
+    -- `slow` fades the words to their alpha (a pick that slides), rather
+    -- than setting it at once (the mouse, a pick that doesn't).
+    function b:paint(slow)
+        local a = self:alphaNow()
+        local L = parent.tabLine
+        if slow and L and self.alpha and self.alpha ~= a then return L:fade(self, self.alpha, a) end
+        if L then L.fades[self] = nil end
+        self:fadeTo(a)
+    end
+    function b:light(on)
+        on = on and true or false
+        local was = self.on
+        self.on = on
+        local L = T.tabLine(parent)
+        if on then L:to(self) else L:off(self) end
+        self:paint(was ~= on and L.anim ~= nil)
+    end
+    -- true: the orange dot. A number: the count after the words (none at 0).
+    -- A string: that, in the count's place. false or nil: neither.
+    function b:setBadge(v)
+        self.dot:SetShown(v == true)
+        local n = type(v) == "number" and v > 0 and tostring(v)
+                  or type(v) == "string" and v ~= "" and v or nil
+        self.count:SetText(n or "")
+        self.count:SetShown(n ~= nil)
+        self.badge = v
+        self:layout()
+    end
+    function b:setChanged(on)
+        self.mark:SetShown(on and true or false)
+        self:layout()
+    end
+    function b:SetText(t)
+        self.label:SetText(t or "")
+        self:layout()
+    end
+    function b:GetText() return self.label:GetText() end
+
+    b:SetScript("OnEnter", function(self)
+        self.over = true
+        self:paint()
+    end)
+    b:SetScript("OnLeave", function(self)
+        self.over = false
+        self:paint()
+    end)
+    b:SetScript("OnEnable", function(self) self:paint() end)
+    b:SetScript("OnDisable", function(self) self:paint() end)
+    b.label:SetText(label or "")
+    b:layout()
+    b:paint()
+    return b
+end
+
 -- A page's tab: its name, dim until it's the one on show, which is white with
--- an accent line under it.
-function T.tab(parent, label, h)
+-- an accent line under it. `opts.head` makes the header's tab instead (above).
+function T.tab(parent, label, h, opts)
+    if opts and opts.head then return headTab(parent, label, h, opts) end
     local b = CreateFrame("Button", nil, parent)
     b:SetHeight(h or 24)
     b.label = T.text(b, T.SIZE.tab, true, T.A_DIM)
@@ -1552,6 +2481,7 @@ function T.tab(parent, label, h)
     b.line:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", -6, 0)
     b.line:Hide()
     b:SetWidth(floor((b.label:GetStringWidth() or 40) + 24))
+    T.tabMark(b, 24)
     function b:light(on)
         self.on = on
         self.line:SetColorTexture(T.ACCENT[1], T.ACCENT[2], T.ACCENT[3], 1)
@@ -1565,6 +2495,119 @@ function T.tab(parent, label, h)
         self.label:SetTextColor(1, 1, 1, self.on and 1 or T.A_DIM)
     end)
     return b
+end
+
+-- A strip of tabs in a window's body, for pages under the header, like the
+-- Training window's Overview and Talent Plan. The tabs are T.tab's header
+-- tabs, flush from the left on a faint line, the look of the config window's
+-- strip.
+--
+--   s = T.tabStrip(parent, { { key = "sets", label = "Sets", icon, plain, tip }, ... },
+--                  { pick = function(key) end, h = 30, key = "sets" })
+--   s:select(key, quiet)   lights that tab and calls pick, or only lights it
+--                          when quiet; false for a key it has no tab for
+--   s.key                  the tab lit; s.tabs in order, s.byKey by key
+--   s:setTabs(list)        the tabs it has now, in the same format: a key it
+--                          had keeps its tab, a key that's gone hides
+--   s:setBadge(key, v), s:setChanged(key, on)   a tab's badges (T.tab)
+--
+-- An item's `tip` is a string, or a function(tab) that shows the tooltip.
+-- The strip is as wide as its tabs. With `opts.wide` the caller sets its
+-- width, so its line runs the whole width, and `opts.inset` starts the tabs
+-- that far in from its left edge.
+T.TAB_STRIP = { h = 30, rule = 0.07 }
+function T.tabStrip(parent, items, opts)
+    opts = opts or {}
+    local S = T.TAB_STRIP
+    local h = opts.h or S.h
+    local s = CreateFrame("Frame", nil, parent)
+    s:SetHeight(h)
+    s.rule = T.fill(s, { 1, 1, 1 }, S.rule, "BACKGROUND")
+    s.rule:SetHeight(1)
+    s.rule:SetPoint("BOTTOMLEFT", s, "BOTTOMLEFT", 0, 0)
+    s.rule:SetPoint("BOTTOMRIGHT", s, "BOTTOMRIGHT", 0, 0)
+    s.tabs, s.byKey = {}, {}
+    local made = {}
+
+    local function make(it, key)
+        local b = T.tab(s, it.label, h, { head = true, icon = it.icon, plain = it.plain })
+        b.key = key
+        b:SetScript("OnClick", function(self) s:select(self.key) end)
+        b:HookScript("OnEnter", function(self)
+            local tip = self.item and self.item.tip
+            if type(tip) == "function" then
+                tip(self)
+            elseif tip then
+                local label = self.item.label
+                T.tip(self, label or tip, label and { tip } or nil)
+            end
+        end)
+        b:HookScript("OnLeave", function(self)
+            if self.item and self.item.tip and _G.GameTooltip then _G.GameTooltip:Hide() end
+        end)
+        made[key] = b
+        return b
+    end
+
+    function s:layout()
+        local x = opts.inset or 0
+        for _, b in ipairs(self.tabs) do
+            b:ClearAllPoints()
+            b:SetPoint("TOPLEFT", self, "TOPLEFT", x, 0)
+            x = x + (b:GetWidth() or 0)
+        end
+        if not opts.wide then self:SetWidth(x) end
+        T.snapTabLine(self)
+        return x
+    end
+
+    function s:setTabs(list)
+        for _, b in ipairs(self.tabs) do b:Hide() end
+        self.tabs, self.byKey = {}, {}
+        for i, it in ipairs(list or {}) do
+            local key = it.key == nil and i or it.key
+            local b = made[key]
+            if b then
+                if it.icon and b.icon and b.icon.SetTexture then b.icon:SetTexture(it.icon) end
+                if (it.label or "") ~= (b:GetText() or "") then b:SetText(it.label) end
+            else
+                b = make(it, key)
+            end
+            b.item = it
+            b:Show()
+            self.tabs[i], self.byKey[key] = b, b
+        end
+        if self.key ~= nil and not self.byKey[self.key] then self.key = nil end
+        for _, b in ipairs(self.tabs) do b:light(b.key == self.key) end
+        self:layout()
+    end
+
+    function s:select(key, quiet)
+        if not self.byKey[key] then return false end
+        self.key = key
+        for _, b in ipairs(self.tabs) do b:light(b.key == key) end
+        local pick = self.pick or opts.pick
+        if not quiet and pick then pick(key) end
+        return true
+    end
+
+    function s:setBadge(key, v)
+        local b = self.byKey[key]
+        if not b then return end
+        b:setBadge(v)
+        self:layout()
+    end
+
+    function s:setChanged(key, on)
+        local b = self.byKey[key]
+        if not b then return end
+        b:setChanged(on)
+        self:layout()
+    end
+
+    s:setTabs(items)
+    if opts.key ~= nil then s:select(opts.key, true) end
+    return s
 end
 
 -- A switch, EUI's toggle: a track that fills with the accent when on, and a
@@ -1646,9 +2689,22 @@ function T.edit(parent, w, h)
         T.paint(self, T.ACCENT, 0.9)
     end)
     e:SetScript("OnEditFocusLost", function(self)
-        T.paint(self, { 1, 1, 1 }, 0.12)
+        T.paint(self, self.restEdge or { 1, 1, 1 }, self.restAlpha or 0.12)
         if self.onFocusLost then self.onFocusLost(self) end
     end)
+    return e
+end
+
+-- Gives edit box `e` (from T.edit) a solid fill and a solid `edge`.
+--
+-- The faint white edge of T.edit mixes with what's behind it. On a tinted
+-- window, like the Mailbox's market tint, that turns it a muddy olive. A
+-- solid grey edge and fill look the same on every tint.
+T.SOLID_EDGE = { 0.2, 0.2, 0.2 }
+function T.solidEdit(e, edge)
+    e.restEdge, e.restAlpha = edge or T.SOLID_EDGE, 1
+    if e.bg then e.bg:SetColorTexture(T.INPUT[1], T.INPUT[2], T.INPUT[3], 1) end
+    if not (e.HasFocus and e:HasFocus()) then T.paint(e, e.restEdge, 1) end
     return e
 end
 
@@ -1694,6 +2750,80 @@ function T.segment(parent, label, w, h)
         end
     end
     return b
+end
+
+-- A compact switch for a mode or a filter (Short/All, a view, a range): boxed
+-- segments side by side that share their borders, 11 bold at 22 high, each
+-- as wide as its words. A near-black fill and a grey edge that brightens
+-- under the mouse; the chosen one is washed with the accent and its words
+-- go white. Page switches are tabs (T.tab), not this.
+--
+--   s = T.segments(parent, { { key = "short", label = "Short", tip = fn }, ... },
+--                  { pick = function(key) end, h = 22 })
+--   s:show(key, enabled)   paints the chosen one, and answers the whole width
+--   s.segs                 the segments, each with .key; s.key the chosen one
+--
+-- An item's `w` fixes its width; `tip(seg)` shows its tooltip.
+T.CONTROL.segments = { h = 22, size = 11, pad = 18, fill = { 0.02, 0.02, 0.02 },
+                       edge = { 0.25, 0.25, 0.25 }, hover = { 0.45, 0.45, 0.45 },
+                       glow = 0.22, off = 0.6 }
+function T.segments(parent, items, opts)
+    opts = opts or {}
+    local S = T.CONTROL.segments
+    local h = opts.h or T.controlH(parent, S.h)
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetHeight(h)
+    row.segs = {}
+    row.enabled = true
+    local x = 0
+    for i, it in ipairs(items) do
+        local s = CreateFrame("Button", nil, row)
+        s:SetHeight(h)
+        s.fill = T.fill(s, S.fill, 1, "BACKGROUND")
+        s.fill:SetAllPoints(s)
+        s.glow = T.fill(s, T.ACCENT, S.glow, "BORDER")
+        s.glow:SetAllPoints(s)
+        s.glow:Hide()
+        T.border(s, S.edge, 1, "OVERLAY")
+        s.label = T.text(s, S.size, true, S.off)
+        s.label:SetPoint("CENTER", s, "CENTER", 0, 0)
+        s.label:SetJustifyH("CENTER")
+        s.label:SetText(it.label or "")
+        s.key = it.key == nil and i or it.key
+        local w = it.w or floor((s.label:GetStringWidth() or 0) + 0.5) + S.pad
+        s:SetWidth(w)
+        s:SetPoint("TOPLEFT", row, "TOPLEFT", x, 0)
+        s:SetScript("OnEnter", function(self)
+            if row.enabled then T.paint(self, S.hover, 1) end
+            if it.tip then it.tip(self) end
+        end)
+        s:SetScript("OnLeave", function(self)
+            T.paint(self, S.edge, 1)
+            if it.tip and _G.GameTooltip then _G.GameTooltip:Hide() end
+        end)
+        s:SetScript("OnClick", function(self)
+            if not row.enabled then return end
+            local pick = row.pick or opts.pick
+            if pick then pick(self.key) end
+        end)
+        row.segs[i] = s
+        x = x + w - 1
+    end
+    row:SetWidth(#row.segs > 0 and x + 1 or 0)
+
+    function row:show(key, enabled)
+        self.key = key
+        self.enabled = enabled ~= false
+        local a = self.enabled and 1 or 0.4
+        for _, s in ipairs(self.segs) do
+            local on = s.key == key
+            s.glow:SetShown(on)
+            s.label:SetTextColor(1, 1, 1, (on and 1 or S.off) * a)
+        end
+        return self:GetWidth()
+    end
+    row:show(opts.key)
+    return row
 end
 
 -- A slider: a thin track that fills with the accent up to a white knob. It is
@@ -1853,8 +2983,9 @@ end
 -- A small chip: a few words in a tinted box, for a status like "Not in a
 -- group" or "View only". The one chip of the window, so a state, a tag and a
 -- count all look the same. `chip:show(text, color, caps)` paints it, in the
--- text's own case unless `caps`. The words are cut at `chip.maxW` when it's
--- set.
+-- text's own case unless `caps`. With no `color` it's the plain grey chip.
+-- The words are cut at `chip.maxW` when it's set. A status, not a control:
+-- a chip that's clicked is T.chipButton.
 function T.chip(parent)
     local size = T.CONTROL.chip
     local pad = size.pad
@@ -1870,9 +3001,15 @@ function T.chip(parent)
         self.color = color
         self.label:SetWidth(0)
         self.label:SetText(caps and text:upper() or text)
-        self.label:SetTextColor(color[1], color[2], color[3], 1)
-        self.bg:SetColorTexture(color[1], color[2], color[3], 0.12)
-        T.paint(self, color, 0.45)
+        if color then
+            self.label:SetTextColor(color[1], color[2], color[3], 1)
+            self.bg:SetColorTexture(color[1], color[2], color[3], 0.12)
+            T.paint(self, color, 0.45)
+        else
+            self.label:SetTextColor(1, 1, 1, 0.8)
+            self.bg:SetColorTexture(1, 1, 1, 0.08)
+            T.paint(self, { 1, 1, 1 }, 0.15)
+        end
         local w = floor((self.label:GetStringWidth() or 40) + pad)
         if self.maxW and w > self.maxW then
             w = self.maxW
@@ -1881,6 +3018,83 @@ function T.chip(parent)
         self:SetWidth(w)
         self:Show()
     end
+    return c
+end
+
+-- A filter chip: a few words in a box that's clicked to turn the filter on
+-- or off. Off it's a faint box with words at .70; under the mouse its edge
+-- and words brighten; on, it's washed with the accent. `opts.color` tints
+-- the words (T.ORANGE for a filter that wants attention). `opts.remove`
+-- adds a cross after the words that reddens under the mouse, for a chip that
+-- takes its filter off when clicked.
+--
+--   c = T.chipButton(parent, "Soulbound", { pick = function(c) end })
+--   c:setOn(on)      c:setText(text)      c.on
+T.CONTROL.chipButton = { h = 20, size = 11, pad = 7, fill = 0.05, edge = 0.15, hover = 0.32,
+                         off = 0.7, glow = 0.22, glowEdge = 0.7 }
+local CROSS = "\195\151"
+function T.chipButton(parent, label, opts)
+    opts = opts or {}
+    local S = T.CONTROL.chipButton
+    local c = CreateFrame("Button", nil, parent)
+    c:SetHeight(opts.h or S.h)
+    c.bg = T.fill(c, { 1, 1, 1 }, S.fill)
+    c.bg:SetAllPoints(c)
+    T.border(c, { 1, 1, 1 }, S.edge)
+    c.label = T.text(c, S.size, true, S.off)
+    c.label:SetPoint("LEFT", c, "LEFT", S.pad, 0)
+    c.label:SetWordWrap(false)
+    c.on, c.over = false, false
+    local function words(self)
+        local t = self.text or ""
+        if opts.remove then
+            t = t .. "  " .. (self.over and "|cffff4d4d" .. CROSS .. "|r" or "|cff8c919a" .. CROSS .. "|r")
+        end
+        return t
+    end
+    function c:paint()
+        local col = opts.color
+        local a = (self.on or self.over) and 1 or S.off
+        if self.on then
+            self.bg:SetColorTexture(T.ACCENT[1], T.ACCENT[2], T.ACCENT[3], S.glow)
+            T.paint(self, T.ACCENT, S.glowEdge)
+        else
+            self.bg:SetColorTexture(1, 1, 1, S.fill)
+            T.paint(self, { 1, 1, 1 }, self.over and S.hover or S.edge)
+        end
+        self.label:SetText(words(self))
+        if col and not self.on then
+            self.label:SetTextColor(col[1], col[2], col[3], 1)
+        else
+            self.label:SetTextColor(1, 1, 1, a)
+        end
+    end
+    function c:setText(text)
+        self.text = text or ""
+        self.label:SetText(words(self))
+        self:SetWidth(floor((self.label:GetStringWidth() or 0) + 0.5) + 2 * S.pad)
+        self:paint()
+    end
+    function c:setOn(on)
+        self.on = on and true or false
+        self:paint()
+    end
+    c:SetScript("OnEnter", function(self)
+        self.over = true
+        self:paint()
+        if self.tip then self.tip(self) end
+    end)
+    c:SetScript("OnLeave", function(self)
+        self.over = false
+        self:paint()
+        if self.tip and _G.GameTooltip then _G.GameTooltip:Hide() end
+    end)
+    c:SetScript("OnClick", function(self)
+        local pick = self.pick or opts.pick
+        if pick then pick(self) end
+    end)
+    c:setText(label)
+    if opts.on then c:setOn(true) end
     return c
 end
 
@@ -1944,6 +3158,11 @@ end
 --
 --   dd = T.dropdown(parent, w, h)
 --   dd:setItems({ { value = v, label = "Text", swatch = {r,g,b}, icon = path } })
+--                              `indent` moves an item right in the menu, in px.
+--                              An `icon` shows in the swatch's place, cropped
+--                              like T.icon, with the swatch's color as its edge.
+--                              With `round`, it's a T.circleIcon instead, with
+--                              `ring` as its ring (a loadout's color).
 --   dd:show(value, enabled)    paints the chosen one
 --   dd.onPick(value)           called when one is picked
 --
@@ -1957,7 +3176,7 @@ end
 function T.dropButton(parent, w, h)
     local size = T.CONTROL.dropdown
     local d = CreateFrame("Button", nil, parent)
-    d:SetSize(w or size.w, h or size.h)
+    d:SetSize(w or size.w, h or T.controlH(parent, size.h))
     d.bg = T.fill(d, T.INPUT, 0.9)
     d.bg:SetAllPoints(d)
     T.border(d, { 1, 1, 1 }, 0.14)
@@ -1965,6 +3184,9 @@ function T.dropButton(parent, w, h)
     d.swatch:SetSize(10, 10)
     d.swatch:SetPoint("LEFT", d, "LEFT", 8, 0)
     d.swatch:Hide()
+    d.itemIcon = T.icon(d, nil, 14)
+    d.itemIcon:SetPoint("LEFT", d, "LEFT", 7, 0)
+    d.itemIcon:Hide()
     d.label = T.text(d, size.size, true, T.A_TEXT)
     d.label:SetPoint("LEFT", d, "LEFT", 8, 0)
     d.label:SetPoint("RIGHT", d, "RIGHT", -20, 0)
@@ -1974,6 +3196,7 @@ function T.dropButton(parent, w, h)
     return d
 end
 
+local menuCount = 0
 function T.dropdown(parent, w, h)
     local d = T.dropButton(parent, w, h)
     local ROW, SIZE = T.CONTROL.dropdown.row, T.CONTROL.dropdown.size
@@ -1983,12 +3206,16 @@ function T.dropdown(parent, w, h)
     -- scroll frame cuts off whatever reaches past its edge, so a menu inside
     -- it would be cut off at the bottom of the page. It takes the
     -- dropdown's scale when it opens instead.
-    local menu = CreateFrame("Frame", nil, UIParent)
+    menuCount = menuCount + 1
+    local menu = CreateFrame("Frame", ADDON .. "DropdownMenu" .. menuCount, UIParent)
     menu:SetFrameStrata("FULLSCREEN_DIALOG")
     menu:SetPoint("TOPLEFT", d, "BOTTOMLEFT", 0, -2)
+    -- A dropdown low in a window (a footer's) keeps its menu on screen.
+    if menu.SetClampedToScreen then menu:SetClampedToScreen(true) end
     menu.bg = T.fill(menu, { 0.07, 0.08, 0.10 }, 0.98)
     menu.bg:SetAllPoints(menu)
     T.border(menu, { 1, 1, 1 }, 0.18)
+    popupShadow(menu)
     menu:Hide()
     menu.rows = {}
     menu.owner = d
@@ -2003,8 +3230,12 @@ function T.dropdown(parent, w, h)
         r.hl:SetColorTexture(T.ACCENT[1], T.ACCENT[2], T.ACCENT[3], over and 0.35 or 0.18)
     end
 
+    -- An item may carry `closed`, shorter words for the dropdown itself
+    -- when it's picked ("PvP" for the menu's "PvP · 4 · In use"). The menu
+    -- grows wider than the dropdown to fit its longest row.
     function d:setItems(items)
         self.items = items
+        local wide = 0
         for i, it in ipairs(items) do
             local r = menu.rows[i]
             if not r then
@@ -2015,6 +3246,8 @@ function T.dropdown(parent, w, h)
                 r.swatch = T.fill(r, { 1, 1, 1 }, 1, "ARTWORK")
                 r.swatch:SetSize(10, 10)
                 r.swatch:SetPoint("LEFT", r, "LEFT", 8, 0)
+                r.itemIcon = T.icon(r, nil, 14)
+                r.itemIcon:Hide()
                 r.label = T.text(r, SIZE, false, T.A_TEXT)
                 r:SetScript("OnEnter", function(self) paintRow(self, true) end)
                 r:SetScript("OnLeave", function(self) paintRow(self, false) end)
@@ -2029,19 +3262,46 @@ function T.dropdown(parent, w, h)
             r:SetPoint("TOPLEFT", menu, "TOPLEFT", 1, -1 - (i - 1) * ROW)
             r:SetPoint("RIGHT", menu, "RIGHT", -1, 0)
             r.label:ClearAllPoints()
-            if it.swatch then
+            local x = it.indent or 0
+            r.swatch:ClearAllPoints()
+            r.swatch:SetPoint("LEFT", r, "LEFT", 8 + x, 0)
+            r.itemIcon:ClearAllPoints()
+            r.itemIcon:SetPoint("LEFT", r, "LEFT", 7 + x, 0)
+            local lx = 8
+            if r.circle then r.circle:Hide() end
+            if it.icon and it.round then
+                r.swatch:Hide()
+                r.itemIcon:Hide()
+                if not r.circle then r.circle = T.circleIcon(r, nil, 14) end
+                r.circle:ClearAllPoints()
+                r.circle:SetPoint("LEFT", r, "LEFT", 7 + x, 0)
+                r.circle:SetTexture(it.icon)
+                r.circle:SetEdge(it.ring)
+                r.circle:Show()
+                lx = 27
+            elseif it.icon then
+                r.swatch:Hide()
+                r.itemIcon:SetTexture(it.icon)
+                r.itemIcon:SetEdge(it.swatch)
+                r.itemIcon:Show()
+                lx = 27
+            elseif it.swatch then
+                r.itemIcon:Hide()
                 r.swatch:SetColorTexture(it.swatch[1], it.swatch[2], it.swatch[3], 1)
                 r.swatch:Show()
-                r.label:SetPoint("LEFT", r, "LEFT", 24, 0)
+                lx = 24
             else
+                r.itemIcon:Hide()
                 r.swatch:Hide()
-                r.label:SetPoint("LEFT", r, "LEFT", 8, 0)
             end
+            r.label:SetPoint("LEFT", r, "LEFT", lx + x, 0)
             r.label:SetText(it.label or tostring(it.value))
+            local tw = r.label.GetStringWidth and r.label:GetStringWidth()
+            if type(tw) == "number" then wide = max(wide, tw + lx + x + 8 + 2) end
             r:Show()
         end
         for i = #items + 1, #menu.rows do menu.rows[i]:Hide() end
-        menu:SetSize(max(self:GetWidth() or 160, 120), #items * ROW + 2)
+        menu:SetSize(max(self:GetWidth() or 160, 120, math.ceil(wide)), #items * ROW + 2)
     end
 
     function d:show(value, enabled)
@@ -2049,16 +3309,38 @@ function T.dropdown(parent, w, h)
         local it
         for _, x in ipairs(self.items) do if x.value == value then it = x end end
         self.label:ClearAllPoints()
-        if it and it.swatch then
+        if self.circle then self.circle:Hide() end
+        if it and it.icon and it.round then
+            self.swatch:Hide()
+            self.itemIcon:Hide()
+            if not self.circle then
+                self.circle = T.circleIcon(self, nil, 14)
+                self.circle:SetPoint("LEFT", self, "LEFT", 7, 0)
+            end
+            self.circle:SetTexture(it.icon)
+            self.circle:SetEdge(it.ring)
+            self.circle:Show()
+            self.circle:SetAlpha(enabled and 1 or 0.4)
+            self.label:SetPoint("LEFT", self, "LEFT", 27, 0)
+        elseif it and it.icon then
+            self.swatch:Hide()
+            self.itemIcon:SetTexture(it.icon)
+            self.itemIcon:SetEdge(it.swatch)
+            self.itemIcon:Show()
+            self.itemIcon:SetAlpha(enabled and 1 or 0.4)
+            self.label:SetPoint("LEFT", self, "LEFT", 27, 0)
+        elseif it and it.swatch then
+            self.itemIcon:Hide()
             self.swatch:SetColorTexture(it.swatch[1], it.swatch[2], it.swatch[3], enabled and 1 or 0.4)
             self.swatch:Show()
             self.label:SetPoint("LEFT", self, "LEFT", 24, 0)
         else
+            self.itemIcon:Hide()
             self.swatch:Hide()
             self.label:SetPoint("LEFT", self, "LEFT", 8, 0)
         end
         self.label:SetPoint("RIGHT", self, "RIGHT", -20, 0)
-        self.label:SetText(it and (it.label or tostring(it.value)) or tostring(value or ""))
+        self.label:SetText(it and (it.closed or it.label or tostring(it.value)) or tostring(value or ""))
         self.label:SetTextColor(1, 1, 1, enabled and T.A_TEXT or T.A_OFF)
         if enabled then self:Enable() else self:Disable() menu:Hide() end
         for _, r in ipairs(menu.rows) do paintRow(r, false) end
@@ -2111,7 +3393,24 @@ end
 --
 -- An item with `disabled` set shows faint and does nothing on a click.
 -- Submenus can go as deep as the items do.
-local MENU_ROW, MENU_GAP, MENU_BOX = 22, 9, 12
+--
+-- An item can have an icon before its words, and then the words of every
+-- button in that menu line up after the icons. One that undoes something,
+-- like Remove friend, can be in red:
+--
+--   local it = root:CreateButton("Remove friend", remove)
+--   it.icon, it.danger = T.media("UserMinus"), true
+--
+-- An item that stands for a loadout or a gear set shows its icon round, as
+-- everywhere else (T.circleIcon): `circle` is the icon, `ring` the loadout's
+-- colour, and `indent` moves the icon and words right, for a tree.
+--
+-- A title can be in a colour, like a player's name in their class colour.
+-- Then it keeps its case and shows bold and full size:
+--
+--   root:CreateTitle(name).color = { 0.96, 0.55, 0.73 }
+local MENU_ROW, MENU_GAP, MENU_BOX, MENU_ICON = 22, 9, 12, 14
+local MENU_DANGER = { 1.00, 0.45, 0.30 }
 
 local Items = {}
 Items.__index = Items
@@ -2228,6 +3527,10 @@ local function menuRow(menu)
     r.box.on:SetPoint("TOPLEFT", r.box, "TOPLEFT", 3, -3)
     r.box.on:SetPoint("BOTTOMRIGHT", r.box, "BOTTOMRIGHT", -3, 3)
 
+    r.icon = r:CreateTexture(nil, "ARTWORK")
+    r.icon:SetSize(MENU_ICON, MENU_ICON)
+    r.icon:SetPoint("LEFT", r, "LEFT", 9, 0)
+    r.icon:Hide()
     r.label = T.text(r, size.size, false, T.A_TEXT)
     if r.label.SetWordWrap then r.label:SetWordWrap(false) end
     r.arrow = T.text(r, size.size, false, T.A_DIM)
@@ -2305,6 +3608,8 @@ local function menuFrame(level)
         local deeper = menus[level + 1]
         if deeper then deeper:Hide() end
     end)
+    -- After the scripts above, since the shadow hooks OnShow to fit itself.
+    popupShadow(m)
 
     -- Whether each tick and radio is on, and each submenu has one on, asked
     -- again after every click.
@@ -2348,6 +3653,10 @@ function T.openMenu(desc, level, row, under)
     local m = menuFrame(level)
     local a = T.ACCENT
     local y, w = 1, 140
+    local icons = false
+    for _, it in ipairs(desc.items) do
+        if it.icon or it.circle then icons = true end
+    end
     for i, it in ipairs(desc.items) do
         local r = m.rows[i] or menuRow(m)
         m.rows[i] = r
@@ -2368,9 +3677,36 @@ function T.openMenu(desc, level, row, under)
         r.arrow:SetShown(it.kind == "button" and #it.items > 0)
         r.arrow:SetTextColor(1, 1, 1, T.A_DIM)
         r.label:ClearAllPoints()
-        local x = it.kind == "check" and 8 + MENU_BOX + 8 or 10
+        r.icon:SetShown(it.icon ~= nil)
+        if it.icon then
+            r.icon:SetTexture(it.icon)
+            local c = it.danger and MENU_DANGER or { 1, 1, 1 }
+            r.icon:SetVertexColor(c[1], c[2], c[3], it.disabled and T.A_FAINT or 0.8)
+        end
+        local indent = it.indent or 0
+        if it.circle then
+            if not r.circle then r.circle = T.circleIcon(r, nil, MENU_ICON) end
+            r.circle:ClearAllPoints()
+            r.circle:SetPoint("LEFT", r, "LEFT", 9 + indent, 0)
+            r.circle:SetTexture(it.circle)
+            r.circle:SetEdge(it.ring)
+            r.circle:Show()
+            r.circle:SetAlpha(it.disabled and T.A_FAINT or 1)
+        elseif r.circle then
+            r.circle:Hide()
+        end
+        local x = 10
+        if it.kind == "check" then
+            x = 8 + MENU_BOX + 8
+        elseif icons and (it.kind == "button" or it.kind == "radio") then
+            x = 9 + MENU_ICON + 8 + indent
+        end
         r.label:SetPoint("LEFT", r, "LEFT", x, 0)
-        if it.kind == "title" then
+        if it.kind == "title" and it.color then
+            r.label:SetFont(T.BOLD, T.SIZE.body, "")
+            r.label:SetText(it.text or "")
+            r.label:SetTextColor(it.color[1], it.color[2], it.color[3], 1)
+        elseif it.kind == "title" then
             r.label:SetFont(T.BOLD, T.SIZE.caption, "")
             r.label:SetText(T.upper(it.text or ""))
             r.label:SetTextColor(1, 1, 1, T.A_DIM)
@@ -2381,7 +3717,8 @@ function T.openMenu(desc, level, row, under)
         else
             r.label:SetFont(T.FONT, size.size, "")
             r.label:SetText(it.text or "")
-            r.label:SetTextColor(1, 1, 1, it.disabled and T.A_FAINT or T.A_TEXT)
+            local c = it.danger and MENU_DANGER or { 1, 1, 1 }
+            r.label:SetTextColor(c[1], c[2], c[3], it.disabled and T.A_FAINT or T.A_TEXT)
         end
         r.right:ClearAllPoints()
         r.right:SetPoint("RIGHT", r, "RIGHT", r.arrow:IsShown() and -24 or -10, 0)
@@ -2424,6 +3761,15 @@ function T.openMenu(desc, level, row, under)
     return m
 end
 
+-- The window `f` is in: its last parent below UIParent, or `f` itself.
+local function windowOf(f)
+    local p = f.GetParent and f:GetParent()
+    while p and p ~= UIParent do
+        f, p = p, p.GetParent and p:GetParent()
+    end
+    return f
+end
+
 -- `under` opens it under the owner, for a button that drops a menu down, in
 -- place of at the cursor. A second click on the owner closes it. A menu with
 -- no button of its own (UIParent owns it) opens afresh each time.
@@ -2438,7 +3784,24 @@ function T.menu(owner, build, under)
     local root = newItems()
     build(owner, root)
     local m = T.openMenu(root, 1, nil, under and owner or nil)
-    if m then m.owner = owner end
+    if not m then return m end
+    m.owner = owner
+    -- The menu goes with its owner's window, as when the window closes by a
+    -- slash command. A menu left open would still edit what that window showed.
+    --
+    -- We watch the window and not the owner, because owners hide on purpose
+    -- while their menu should stay open. Buff Coordinator's raid pane hides
+    -- every player row before it draws again, so a Spec pick in a player's
+    -- menu (or any roster change) would close that menu.
+    m.window = owner and owner ~= UIParent and windowOf(owner) or nil
+    local win = m.window
+    if win and win.HookScript and not win.menuGoesWith then
+        win.menuGoesWith = true
+        win:HookScript("OnHide", function(self)
+            local open1 = menus[1]
+            if open1 and open1:IsShown() and open1.window == self then closeMenus() end
+        end)
+    end
     return m
 end
 
@@ -2607,6 +3970,16 @@ function T.grip(f, done, reset)
         local h = max(minH or 1, d.h + d.y - y)
         if maxW and maxW > 0 then w = min(w, maxW) end
         if maxH and maxH > 0 then h = min(h, maxH) end
+        -- A window that keeps its shape (WindowKit's `aspect`) follows the
+        -- mouse with one side, and the other side comes from it.
+        -- Of the size that follows the mouse across and the one that follows
+        -- it down, the larger wins. Picking by which way the mouse moved more
+        -- made the window jump when that changed mid-drag.
+        if f.keepAspect then
+            local w1, h1 = f.keepAspect(d.w + x - d.x, h, "w", minW, minH, maxW, maxH)
+            local w2, h2 = f.keepAspect(w, d.h + d.y - y, "h", minW, minH, maxW, maxH)
+            if w1 >= w2 then w, h = w1, h1 else w, h = w2, h2 end
+        end
         f:SetSize(w, h)
     end
     grip:SetScript("OnMouseDown", function(self, button)
@@ -2633,7 +4006,35 @@ function T.grip(f, done, reset)
     return grip
 end
 
-function T.scroll(parent)
+-- How far a scrollbar's bottom has to come up to clear the resize grip of
+-- the window it's in (`f.grip`), in the scroll frame's units: 0 when the bar
+-- doesn't run down beside the grip. A window with no footer puts its lists
+-- right down to its bottom edge, where the grip sits.
+local function gripRoom(sf, barW)
+    local p = sf.GetParent and sf:GetParent()
+    local grip
+    while p do
+        if type(p.grip) == "table" and p.grip.IsShown and p.grip:IsShown() then
+            grip = p.grip
+            break
+        end
+        p = p.GetParent and p:GetParent()
+    end
+    if not (grip and sf.GetEffectiveScale and grip.GetEffectiveScale) then return 0 end
+    local s, gs = sf:GetEffectiveScale() or 1, grip:GetEffectiveScale() or 1
+    local r, b, t = sf:GetRight(), sf:GetBottom(), sf:GetTop()
+    local gl, gr, gt, gb = grip:GetLeft(), grip:GetRight(), grip:GetTop(), grip:GetBottom()
+    if not (r and b and t and gl and gr and gt and gb) or s <= 0 then return 0 end
+    r, b, t = r * s, b * s, t * s
+    gl, gr, gt, gb = gl * gs, gr * gs, gt * gs, gb * gs
+    if r <= gl or r - barW * s >= gr or b >= gt or t <= gb then return 0 end
+    return (gt - b) / s + 2
+end
+
+-- A scrolling list. opts.shadow puts T.scrollShadow on it: true or "TOP"
+-- for a list under a fixed bar, "BOTTOM" over one, "BOTH" between two. Its
+-- bar stops short of the window's resize grip when it would run into it.
+function T.scroll(parent, opts)
     local sf = CreateFrame("ScrollFrame", nil, parent)
     local child = CreateFrame("Frame", nil, sf)
     child:SetSize(10, 10)
@@ -2690,7 +4091,76 @@ function T.scroll(parent)
         end)
     end
 
+    -- Keeps the list where it's scrolled through a collapse.
+    --
+    -- Folding a group or shutting a row's details near the bottom makes the
+    -- list shorter than the spot we were scrolled to. The game then pulls the
+    -- whole list down, and the header we just clicked jumps away from the
+    -- mouse. So a list calls sf:hold() right before it collapses something,
+    -- and the list then stays at least as tall as its bottom edge was, with
+    -- blank space under the last row. A collapse that slides shut calls it as
+    -- the slide starts (or on each step), so the blank space grows under the
+    -- rows while they slide up, and nothing in view moves but the rows under
+    -- what shut.
+    --
+    -- The blank space goes away as we scroll back up, when the rows grow to
+    -- fill the list again, when no row is left in view at all (a search left
+    -- a few rows far above us), and when the list hides.
+    --
+    -- It only works for a list that sets its rows' height with
+    -- sf:setContentHeight(h) rather than on sf.child, since it has to know
+    -- how tall the rows are without the blank space. WorldMapQuests' drawer
+    -- was the first to do it, and AuctionWindow's lists (AW.list) do too.
+    sf.held = 0
+    function sf:hold()
+        if not self.rowsH then return end
+        local cur = self.GetVerticalScroll and self:GetVerticalScroll() or 0
+        if cur <= 0.5 then return end
+        self.held = max(self.held, cur + (self:GetHeight() or 0))
+    end
+
+    -- Sets how tall the rows are, `h`. While we hold room under them (see
+    -- sf:hold), the scroll child stays taller than that. Rows that grow back
+    -- to where we held give it up.
+    function sf:setContentHeight(h)
+        h = max(h or 0, 0)
+        local was = self.rowsH or 0
+        self.rowsH = h
+        if self.held > 0 and h > was and h >= self.held then self.held = 0 end
+        child:SetHeight(max(1, h, self.held))
+    end
+
+    -- How tall the rows are, without the blank space we hold under them.
+    function sf:contentHeight()
+        return self.rowsH or child:GetHeight() or 0
+    end
+
+    -- Gives back the blank space we no longer need. Scrolling up shrinks it to
+    -- the new bottom edge, so scrolling down never reaches past it again.
+    local function letGo(self)
+        local held = self.held
+        if held <= 0 then return end
+        local rows = self.rowsH or 0
+        local cur = self.GetVerticalScroll and self:GetVerticalScroll() or 0
+        local bottom = cur + (self:GetHeight() or 0)
+        if cur <= 0.5 or rows <= cur then held = 0
+        elseif bottom < held then held = bottom > rows and bottom or 0 end
+        if held ~= self.held then
+            self.held = held
+            child:SetHeight(max(1, rows, held))
+        end
+    end
+
+    -- Drops the blank space at once, for a list that hides or gets new rows.
+    function sf:letGo()
+        if self.held <= 0 then return end
+        self.held = 0
+        child:SetHeight(max(1, self.rowsH or 0))
+    end
+    sf:SetScript("OnHide", function(self) self:letGo() end)
+
     function sf:update()
+        letGo(self)
         -- A list that paints only its rows in view (AuctionWindow's) hears
         -- each scroll here.
         if self.onScroll then self:onScroll() end
@@ -2701,11 +4171,17 @@ function T.scroll(parent)
             return
         end
         track:Show()
-        local th = max(30, h * h / (h + r))
+        local room = gripRoom(self, 4)
+        if room ~= (track.gripRoom or 0) then
+            track.gripRoom = room
+            track:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", 0, room)
+        end
+        local len = max(1, h - room)
+        local th = max(30, len * h / (h + r))
         local cur = self.GetVerticalScroll and self:GetVerticalScroll() or 0
         thumb:SetHeight(th)
         thumb:ClearAllPoints()
-        thumb:SetPoint("TOP", track, "TOP", 0, -(h - th) * (cur / r))
+        thumb:SetPoint("TOP", track, "TOP", 0, -(len - th) * (cur / r))
     end
 
     if sf.EnableMouseWheel then sf:EnableMouseWheel(true) end
@@ -2762,7 +4238,7 @@ function T.scroll(parent)
         self:SetScript("OnUpdate", function(me)
             if not IsMouseButtonDown("LeftButton") then return stopDrag(me) end
             local _, cy = GetCursorPosition()
-            local h = sf:GetHeight() or 1
+            local h = (sf:GetHeight() or 1) - (track.gripRoom or 0)
             local th = me:GetHeight() or 30
             local r = range()
             local moved = me.from - cy / me:GetEffectiveScale()
@@ -2784,7 +4260,23 @@ function T.scroll(parent)
             self.tex:SetColorTexture(1, 1, 1, 0.27)
         end
     end)
+    local shadow = opts and opts.shadow
+    if shadow then
+        if shadow ~= "BOTTOM" then T.scrollShadow(sf) end
+        if shadow == "BOTTOM" or shadow == "BOTH" then T.scrollShadow(sf, "BOTTOM") end
+    end
     return sf
+end
+
+-- Holds the scroll of the list `f` sits in (T.scroll's sf:hold), for a part
+-- deep inside a page that folds itself, like a "Show less" under a ranking.
+-- A list that doesn't set its height with setContentHeight is left alone.
+function T.holdScroll(f)
+    local p = f
+    while p do
+        if p.hold and p.setContentHeight then return p:hold() end
+        p = p.GetParent and p:GetParent()
+    end
 end
 
 -- Flashes `f` in the accent, fading out over a moment, to point at it: a
@@ -2903,6 +4395,11 @@ function T.scrollShadow(sf, edge)
         local on = s > 0.5
         if bottom then
             local range = sf.GetVerticalScrollRange and sf:GetVerticalScrollRange() or 0
+            -- Blank space a collapse holds under the rows (sf:hold) isn't
+            -- more of the list.
+            if (sf.held or 0) > 0 and sf.rowsH then
+                range = min(range, max(0, sf.rowsH - (sf:GetHeight() or 0)))
+            end
             on = range - s > 0.5
         end
         if on and not host:IsShown() then
@@ -3016,7 +4513,7 @@ end
 -- "Drag", "Alt+click") or give an ID are smaller than the rest of its text,
 -- so they don't compete with what the tooltip is about. BayovCore's Tooltips
 -- page sets the size (Modules/Tooltip.lua). Where that module isn't loaded,
--- like on anniversary or in Buff Coordinator, the size is TIP_SMALL.
+-- like in Buff Coordinator, the size is TIP_SMALL.
 --
 -- A tooltip reuses its lines' font strings for whatever it shows next, and a
 -- font set on one stays. So we remember each line's font before we shrink it,
@@ -3255,21 +4752,66 @@ function T.tipDone(tip)
     if changed then tip:Show() end
 end
 
--- A tooltip with a white title, then `lines` (a string, or { text, r, g, b }),
--- then the key `hints` under a blank line.
-function T.tip(owner, title, lines, hints)
+-- A tooltip's lines. Each is one of:
+--   "text"                 grey (.8), wrapped
+--   { text }               white, wrapped
+--   { text, r, g, b }      in that colour (wrap = false keeps it one line)
+--   { left, right }        a double line: left grey, right white
+-- `color` ({ r, g, b }) is the colour of a line that doesn't give its own:
+-- a string, a { text } and a double line's left side.
+local TIP_GREY, TIP_WHITE = { 0.8, 0.8, 0.8 }, { 1, 1, 1 }
+local function tipLine(tip, l, color)
+    if type(l) ~= "table" then
+        local c = color or TIP_GREY
+        return tip:AddLine(l, c[1], c[2], c[3], true)
+    end
+    if l[2] ~= nil and l[3] == nil then
+        local c = color or TIP_GREY
+        return tip:AddDoubleLine(l[1], l[2], c[1], c[2], c[3], 1, 1, 1)
+    end
+    if l[2] == nil then
+        local c = color or TIP_WHITE
+        return tip:AddLine(l[1], c[1], c[2], c[3], l.wrap ~= false)
+    end
+    tip:AddLine(l[1], l[2] or 1, l[3] or 1, l[4] or 1, l.wrap ~= false)
+end
+
+-- Adds a white title, `lines` and the key `hints` to a tooltip that already
+-- has its owner, like the one a tile or a game hook hands us. `color` is
+-- the colour of lines that don't give their own (tipLine above).
+function T.tipAdd(tip, title, lines, hints, color)
+    if title then tip:AddLine(title, 1, 1, 1) end
+    for _, l in ipairs(lines or {}) do tipLine(tip, l, color) end
+    T.tipHints(tip, hints)
+end
+
+-- Where a tooltip goes: "ANCHOR_TOP", or "TOP" for short.
+local function tipAnchor(a)
+    if not a then return "ANCHOR_RIGHT" end
+    if a:find("^ANCHOR_") then return a end
+    return "ANCHOR_" .. a
+end
+
+-- A tooltip with a white title, then `lines` (T.tipAdd), then the key
+-- `hints` under a blank line. `opts` is where it goes ("RIGHT", the default,
+-- "TOP", "BOTTOM", "LEFT", "CURSOR", "NONE"), or a table
+-- { anchor, x, y, color }: the place, an offset from it, and the colour of
+-- lines that don't give their own.
+function T.tip(owner, title, lines, hints, opts)
     local tip = _G.GameTooltip
     if not tip then return end
-    tip:SetOwner(owner, "ANCHOR_RIGHT")
-    tip:SetText(title, 1, 1, 1)
-    for _, l in ipairs(lines or {}) do
-        if type(l) == "table" then
-            tip:AddLine(l[1], l[2] or 1, l[3] or 1, l[4] or 1, l.wrap ~= false)
-        else
-            tip:AddLine(l, 0.8, 0.8, 0.8, true)
-        end
+    local anchor, x, y, color = opts, nil, nil, nil
+    if type(opts) == "table" then
+        anchor, x, y, color = opts.anchor, opts.x, opts.y, opts.color
     end
-    T.tipHints(tip, hints)
+    anchor = tipAnchor(anchor)
+    if x or y then
+        tip:SetOwner(owner, anchor, x or 0, y or 0)
+    else
+        tip:SetOwner(owner, anchor)
+    end
+    tip:SetText(title, 1, 1, 1)
+    T.tipAdd(tip, nil, lines, hints, color)
     T.tipDone(tip)
 end
 

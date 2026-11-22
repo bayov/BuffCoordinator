@@ -290,12 +290,23 @@ end
 -- buff isn't the spell in b.ranks, which is the totem's cast, so past our
 -- data we go by the rank the game names. nil for a copy with no rank, like
 -- an NPC's, which we can't compare.
-local function rankOf(b, id)
+--
+-- `name` is the aura's name. A copy of the group version goes by the group's
+-- ranks. Prayer of Fortitude 450086 says "Rank 2", and that's the rank 2 of
+-- Prayer of Fortitude at level 60, not Power Word: Fortitude rank 2 at 12.
+local function rankOf(b, id, name)
     if not b.ranks or not readable(id) then return nil end
     local rank, level = NS.Duties.rankOfSpell(b, id)
     if rank then return rank, level end
     local word = rankWord(id)
-    level = word and b.ranks[2 * word]
+    if not word then return nil end
+    local g = b.groupRanks
+    if g and name and name == spellName(g[1]) then
+        level = g[2 * word]
+        if level then return NS.Duties.rankAtLevel(b, level), level end
+        return nil
+    end
+    level = b.ranks[2 * word]
     if level then return word, level end
     return nil
 end
@@ -323,7 +334,7 @@ local function learnId(b, id)
 end
 
 -- The Camp Benefits spell.
--- source: wago Spell 1229741 1.60.1.70685
+-- source: wago Spell 1229741 1.60.1.71037
 local CAMP_BENEFITS = 1229741
 
 -- The text of aura `a` on `unit`, or nil when the game won't say.
@@ -435,7 +446,7 @@ local function readOne(b, auras, unsure, old)
     local a, rank, level
     for _, x in ipairs(auras) do
         if want.ids[x.spellId] or want.names[x.name] then
-            local r, lv = rankOf(b, x.spellId)
+            local r, lv = rankOf(b, x.spellId, x.name)
             if not a or (lv or -1) > (level or -1) then a, rank, level = x, r, lv end
         end
     end
@@ -1564,6 +1575,23 @@ local function groupCast(b, id)
     return name ~= nil and name == spellName(b.group)
 end
 
+-- Whether spell `id` is the Greater Blessing of blessing `b`, of any rank.
+local function greaterCast(b, id)
+    if not b.greater then return false end
+    if id == b.greater then return true end
+    local name = spellName(id)
+    return name ~= nil and name == spellName(b.greater)
+end
+
+-- Counts blessing `b` on everyone of class `class`, for a Greater Blessing.
+-- It reaches the whole class within 100 yards. We can't tell who was
+-- further, so they all count until we read them again.
+local function castOnClass(b, class)
+    for _, m in ipairs(R.list()) do
+        if m.class == class and m.online then Tr.cast(m.name, b) end
+    end
+end
+
 -- Counts long buff `b` on everyone our assignments of it are for, for a
 -- group version.
 local function castOnAll(b)
@@ -1609,6 +1637,8 @@ NS.on("UNIT_SPELLCAST_SUCCEEDED", function(_, unit, castGuid, spellId)
         if aim.all then
             -- A group version reaches everyone it's for.
             castOnAll(b)
+        elseif aim.class and greaterCast(b, spellId) then
+            castOnClass(b, aim.class)
         else
             Tr.cast(aim.name, b)
         end
@@ -1617,7 +1647,11 @@ NS.on("UNIT_SPELLCAST_SUCCEEDED", function(_, unit, castGuid, spellId)
         castOnAll(b)
     elseif to then
         local m = R.byName(to) or (NS.Sync and NS.Sync.member(to))
-        if m then Tr.cast(m.name, b) end
+        if m and greaterCast(b, spellId) then
+            castOnClass(b, m.class)
+        elseif m then
+            Tr.cast(m.name, b)
+        end
     end
 end)
 

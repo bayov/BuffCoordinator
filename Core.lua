@@ -170,8 +170,6 @@ function NS.loadDB()
     -- The HUD's Scale setting is gone. It only moved the icons around, since
     -- the HUD's position scales with it, and Icon width and height size them.
     db.opts.hudScale = nil
-    -- Forever has no Greater Blessings, so their setting is gone.
-    db.opts.useGreater = nil
     -- "Hide when solo" became "Show the HUD": Always, In groups or Never.
     -- Hiding when solo was the default, so only an "off" was ever stored,
     -- and that is Always.

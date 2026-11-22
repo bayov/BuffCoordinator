@@ -13,6 +13,13 @@
 -- it keeps working in combat. Blessings only get a mouseover when everyone
 -- gets the same one from us (B.onlyBlessing).
 --
+-- A paladin gives each class one blessing (Duties.lua). When two or more of
+-- a class miss it, a click puts it up as a Greater Blessing on the whole
+-- class. The players who get another blessing from us, like an Enhancement
+-- shaman's Might among the shamans' Wisdom, get theirs as a single blessing
+-- after it. That's the order PallyPower taught raids, since the Greater one
+-- replaces our single one on them.
+--
 -- The auto-buff button (the Next buff button on screen) is named
 -- BuffCoordinatorNext, so a key can press it (Bindings.xml).
 
@@ -99,26 +106,26 @@ local function itemName(r)
     return r[2]
 end
 
--- "no Sacred Candle" when assignments `list` would use a group version (two
--- or more missing) and we have none of its reagent, or nil. Blessings have
--- no group version on Forever.
-function B.reagentNote(list)
-    for _, a in ipairs(list) do
-        local b = a.buff
-        local r = b and b.group and REAGENT[b.id]
-        if r and B.walks(a) and #Tr.status(a).missing >= 2 and itemCount(r[1]) == 0 then
-            return "no " .. itemName(r)
-        end
-    end
-    return nil
-end
+-- Every Greater Blessing takes a Symbol of Kings.
+local SYMBOL = { 21177, "Symbol of Kings" }
 
-local function subtext(id)
-    local get = (C_Spell and C_Spell.GetSpellSubtext) or _G.GetSpellSubtext
-    if not get then return nil end
-    local ok, text = pcall(get, id)
-    if ok and type(text) == "string" and not NS.secret(text) and text ~= "" then return text end
-    return nil
+-- Whether we trained the group version of `b` (Prayer of Fortitude), or for
+-- a blessing its Greater Blessing, of which any rank will do. A level 40
+-- priest has Fortitude but no Prayer of Fortitude yet. When the game says
+-- we know no rank of `b` at all, we go by our level instead, as
+-- Du.rankFor does.
+function B.knowsGroup(b)
+    local g = b.groupRanks
+    if not g then return true end
+    for i = 1, #g, 2 do
+        if Tr.knows(g[i]) then return true end
+    end
+    local r = b.ranks or {}
+    for i = 1, #r, 2 do
+        if Tr.knows(r[i]) then return false end
+    end
+    local me = NS.Roster.me()
+    return not (me and me.level and g[2] > me.level)
 end
 
 -- Whether everyone in `missing` can take the group version of `b`, like
@@ -130,6 +137,88 @@ local function groupFits(b, missing)
         if t.m.level and lv > t.m.level + NS.Duties.RANK_REACH then return false end
     end
     return true
+end
+
+-- The classes blessing assignment `a` could bless with a Greater Blessing,
+-- by name, as { class, list } with `list` the players missing it that we can
+-- reach. That's a class with two or more of them missing the blessing we give
+-- the class (a.byClass). `soon` counts the ones about to run out too.
+--
+-- One player alone gets a single blessing. It's the same one click, and the
+-- Greater one would also land on the players we give another blessing.
+--
+-- None when the setting is off, or for a blessing we haven't trained the
+-- Greater one of yet (Might at 52, Wisdom at 54, Kings at 60). Then each
+-- player gets a single blessing as before.
+local function greaterClasses(a, soon)
+    if not a.byClass or not NS.Options.get("useGreater") then return {} end
+    local need, order = {}, {}
+    for _, t in ipairs(Tr.status(a).missing) do
+        local class = t.m.class
+        local id = a.byClass[class]
+        if id and t.b.id == id and t.b.greater and (soon or not t.soon)
+           and reachable(t.m, Tr.title(t.b)) then
+            if not need[class] then
+                need[class] = {}
+                order[#order + 1] = class
+            end
+            table.insert(need[class], t)
+        end
+    end
+    table.sort(order)
+    local out = {}
+    for _, class in ipairs(order) do
+        local list = need[class]
+        local b = list[1].b
+        if #list >= 2 and B.knowsGroup(b) and groupFits(b, list) then
+            out[#out + 1] = { class = class, list = list }
+        end
+    end
+    return out
+end
+
+-- The next Greater Blessing for blessing assignment `a`, as { m, b, spell,
+-- class }, or nil. It goes on the first of the class missing it that's in
+-- range of it. Not when the game says we can't cast it, like with no Symbol
+-- of Kings, so then they get single blessings.
+local function greater(a, soon)
+    for _, c in ipairs(greaterClasses(a, soon)) do
+        local b = c.list[1].b
+        local spell = spellName(b.greater)
+        if spell and usable(spell) then
+            for _, t in ipairs(c.list) do
+                if reachable(t.m, spell) then
+                    return { m = t.m, b = b, spell = spell, class = c.class }
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- "no Sacred Candle" when assignments `list` would use a group version (two
+-- or more missing) and we have none of its reagent, or nil. Or "no Symbol of
+-- Kings" for a Greater Blessing.
+function B.reagentNote(list)
+    for _, a in ipairs(list) do
+        local b = a.buff
+        local r = b and b.group and REAGENT[b.id]
+        if r and B.walks(a) and #Tr.status(a).missing >= 2 and B.knowsGroup(b) and itemCount(r[1]) == 0 then
+            return "no " .. itemName(r)
+        end
+        if a.bless and #greaterClasses(a, true) > 0 and itemCount(SYMBOL[1]) == 0 then
+            return "no " .. itemName(SYMBOL)
+        end
+    end
+    return nil
+end
+
+local function subtext(id)
+    local get = (C_Spell and C_Spell.GetSpellSubtext) or _G.GetSpellSubtext
+    if not get then return nil end
+    local ok, text = pcall(get, id)
+    if ok and type(text) == "string" and not NS.secret(text) and text ~= "" then return text end
+    return nil
 end
 
 -- What a click casts to put `b` on player `m`, as (spell, rank). The spell
@@ -151,18 +240,24 @@ end
 
 -- The next { m, b, spell, cast, rank } of assignments `list` that needs a
 -- buff and that we can reach, or nil. Missing buffs come before ones about
--- to run out, or of a lower rank than ours. `spell` is the buff's name, and
--- `cast` what the click casts, with a rank in it for a low player
--- (B.rankedSpell).
+-- to run out, or of a lower rank than ours, and a Greater Blessing on a
+-- class comes before single ones. `spell` is the buff's name, and `cast`
+-- what the click casts, with a rank in it for a low player (B.rankedSpell).
+-- A Greater Blessing has `class` too.
 function B.next(list)
     for _, pass in ipairs({ false, true }) do
         for _, a in ipairs(list) do
+            if a.bless then
+                local g = greater(a, pass)
+                if g then return g end
+            end
             if B.walks(a) and a.buff and a.buff.group and not pass then
                 -- Two or more missing a long buff: its group version buffs
                 -- the whole raid in one cast. It still wants a friendly
                 -- target in range, so we aim it at the first one missing.
                 local missing = Tr.status(a).missing
-                local spell = #missing >= 2 and groupFits(a.buff, missing) and spellName(a.buff.group)
+                local spell = #missing >= 2 and groupFits(a.buff, missing) and B.knowsGroup(a.buff)
+                              and spellName(a.buff.group)
                 if spell and usable(spell) then
                     for _, t in ipairs(missing) do
                         if reachable(t.m, spell) then
@@ -232,7 +327,9 @@ end
 --
 -- In combat a blessing icon casts one fixed blessing on our mouseover. When
 -- we give Kings to some and Wisdom to others, any one blessing we pick would
--- put the wrong one on half of them. So then it casts nothing.
+-- put the wrong one on half of them. So then it casts nothing. When it casts
+-- one, the single blessing takes the place of the Greater one we put up
+-- before the pull, which is the same buff.
 function B.onlyBlessing(list)
     local only
     local function add(id)
@@ -320,7 +417,7 @@ function B.aim(button, list, click)
     end
     set(button, n.cast or n.spell, n.m and n.m.unit or nil, n.macro)
     if click then
-        Tr.aim = n.m and { name = n.m.name, b = n.b, all = n.all, at = GetTime() } or nil
+        Tr.aim = n.m and { name = n.m.name, b = n.b, all = n.all, class = n.class, at = GetTime() } or nil
     end
     return n
 end
